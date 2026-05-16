@@ -1,0 +1,179 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_query_client/flutter_query_client.dart';
+import 'product_controllers.dart';
+import 'product_model.dart';
+import 'product_service.dart';
+
+class ProductFormScreen extends StatefulWidget {
+  final Product? product;
+  const ProductFormScreen({super.key, this.product});
+
+  @override
+  State<ProductFormScreen> createState() => _ProductFormScreenState();
+}
+
+class _ProductFormScreenState extends State<ProductFormScreen> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _titleCtrl;
+  late final TextEditingController _descCtrl;
+  late final TextEditingController _priceCtrl;
+  late final TextEditingController _categoryCtrl;
+  late final TextEditingController _stockCtrl;
+  // Typed as base class so Create/Update share the same QueryBuilder type.
+  late final MutationController<Product> _mutation;
+
+  bool get _isEditing => widget.product != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.product;
+    _titleCtrl = TextEditingController(text: p?.title ?? '');
+    _descCtrl = TextEditingController(text: p?.description ?? '');
+    _priceCtrl = TextEditingController(text: p != null ? '${p.price}' : '');
+    _categoryCtrl = TextEditingController(text: p?.category ?? '');
+    _stockCtrl = TextEditingController(text: p != null ? '${p.stock}' : '0');
+    _mutation = _isEditing ? UpdateProductMutation() : CreateProductMutation();
+  }
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _descCtrl.dispose();
+    _priceCtrl.dispose();
+    _categoryCtrl.dispose();
+    _stockCtrl.dispose();
+    _mutation.close();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    if (_isEditing) {
+      _mutation.mutate(() => productService.updateProduct(widget.product!.id, {
+            'title': _titleCtrl.text.trim(),
+            'description': _descCtrl.text.trim(),
+            'price': double.parse(_priceCtrl.text.trim()),
+            'category': _categoryCtrl.text.trim(),
+            'stock': int.parse(_stockCtrl.text.trim()),
+          }));
+    } else {
+      _mutation.mutate(() => productService.createProduct(
+            title: _titleCtrl.text.trim(),
+            description: _descCtrl.text.trim(),
+            price: double.parse(_priceCtrl.text.trim()),
+            category: _categoryCtrl.text.trim(),
+            stock: int.parse(_stockCtrl.text.trim()),
+          ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return QueryListener<MutationController<Product>, Product>(
+      bloc: _mutation,
+      listenWhen: (prev, curr) => prev.isLoading && !curr.isLoading,
+      listener: (ctx, state) {
+        if (state.error != null) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(content: Text('Error: ${state.error}')),
+          );
+        } else if (state.data != null) {
+          Navigator.pop(ctx, state.data);
+        }
+      },
+      child: QueryBuilder<MutationController<Product>, Product>(
+        bloc: _mutation,
+        builder: (context, state) => Scaffold(
+          appBar:
+              AppBar(title: Text(_isEditing ? 'Edit Product' : 'New Product')),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  _field(_titleCtrl, 'Title'),
+                  const SizedBox(height: 12),
+                  _field(_descCtrl, 'Description', maxLines: 4),
+                  const SizedBox(height: 12),
+                  _field(
+                    _priceCtrl,
+                    'Price',
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                    ],
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Required';
+                      if (double.tryParse(v.trim()) == null) {
+                        return 'Must be a number';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _field(_categoryCtrl, 'Category'),
+                  const SizedBox(height: 12),
+                  _field(
+                    _stockCtrl,
+                    'Stock',
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Required';
+                      if (int.tryParse(v.trim()) == null) {
+                        return 'Must be an integer';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: state.isLoading ? null : _submit,
+                      child: state.isLoading
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : Text(_isEditing ? 'Update' : 'Create'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _field(
+    TextEditingController ctrl,
+    String label, {
+    int maxLines = 1,
+    TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: ctrl,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+        alignLabelWithHint: maxLines > 1,
+      ),
+      maxLines: maxLines,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      validator: validator ??
+          (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+    );
+  }
+}

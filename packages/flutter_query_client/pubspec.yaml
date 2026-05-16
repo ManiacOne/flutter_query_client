@@ -1,0 +1,39 @@
+name: flutter_query_client
+description: "A TanStack Query-inspired server state management library for Flutter. Handles caching, background refetching, pagination, mutations, and network-aware fetching out of the box."
+version: 1.0.0
+repository:
+
+topics:
+  - state-management
+  - query
+  - caching
+  - networking
+  - http
+
+platforms:
+  android:
+  ios:
+
+environment:
+  sdk: ^3.7.2
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  bloc: ^9.0.0
+  flutter_bloc: ^9.1.1
+  freezed_annotation: ^3.0.0
+  meta: ^1.16.0
+  connectivity_plus: ^7.1.1
+  internet_connection_checker_plus: ^3.0.0
+  logging: ^1.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  freezed: ^3.0.6
+  build_runner: ^2.4.15
+  mockito: ^5.4.5
+  build_verify: ^3.1.0
