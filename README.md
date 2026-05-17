@@ -16,6 +16,7 @@ Handles **fetching, caching, synchronizing, and updating** server state with min
 - **Automatic retry with exponential backoff** — resilient to transient failures
 - **Network-aware fetching** — pauses when offline, resumes on reconnect
 - **Refetch on mount** — always, only if stale, or never
+- **Keep previous data** - keeps previous data when fetching data
 - **Global defaults** with per-controller overrides
 - **BLoC-based state** — integrates naturally with `flutter_bloc`
 - **Freezed immutable state** — safe pattern matching on `QueryState`
