@@ -5,21 +5,10 @@ repository: https://github.com/ManiacOne/flutter_query_client
 
 topics:
   - state-management
-  - query
   - caching
-  - networking
-  - http
-  - client
-  - flutter_query
-  - flutter_query_client
-  - flquery
-  - f_query
   - fquery
-  - bloc
-  - cubit
-  - tanstack-query
-  - react-query
   - flutter-query
+  - tanstack-query
 
 platforms:
   android:
