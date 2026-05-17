@@ -8,8 +8,6 @@ import 'package:flutter_query_client/src/utils/error_transform_utils.dart';
 import 'package:flutter_query_client/src/utils/refetch_interval_handle.dart';
 import 'package:flutter_query_client/src/utils/retry_utils.dart';
 import 'package:flutter_query_client/src/utils/stale_listener_handle.dart';
-import 'package:meta/meta.dart';
-
 /// Base class for reactive data fetching with typed params.
 ///
 /// [T] is the data type. [P] is the params type:
@@ -377,7 +375,6 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
   // ─── Remount (hidden → visible) ───────────────────────────────────
 
   /// Called by the provider when the widget transitions from hidden → visible.
-  @internal
   void handleRemount() {
     if (!enabled) return;
     if (state.isLoading || state.isRefetching) return;

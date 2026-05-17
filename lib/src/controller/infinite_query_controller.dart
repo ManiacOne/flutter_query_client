@@ -16,8 +16,6 @@ import 'package:flutter_query_client/src/utils/query_logger.dart';
 import 'package:flutter_query_client/src/utils/refetch_interval_handle.dart';
 import 'package:flutter_query_client/src/utils/retry_utils.dart';
 import 'package:flutter_query_client/src/utils/stale_listener_handle.dart';
-import 'package:meta/meta.dart';
-
 /// Controller for cursor-based infinite pagination queries.
 ///
 /// [T] is the item type (e.g. Product).
@@ -444,7 +442,6 @@ abstract class InfiniteQueryController<T, PageParam, P>
   // ─── Remount (hidden → visible) ───────────────────────────────────
 
   /// Called by the provider when the widget transitions from hidden → visible.
-  @internal
   void handleRemount() {
     if (!enabled) return;
     if (state.isLoading || state.isRefetching || state.isLoadingMore) return;
