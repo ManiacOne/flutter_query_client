@@ -1,17 +1,7 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# macOS
 .DS_Store
-.atom/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
 
-# IntelliJ related
+# IntelliJ
 *.iml
 *.ipr
 *.iws
@@ -19,24 +9,3 @@ migrate_working_dir/
 
 # VS Code
 .vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/.dart_tool/
-**/.flutter-plugins
-**/.flutter-plugins-dependencies
-**/.pub-cache/
-**/.pub/
-**/build/
-**/.metadata
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio build artifacts
-**/android/app/debug
-**/android/app/profile
-**/android/app/release
