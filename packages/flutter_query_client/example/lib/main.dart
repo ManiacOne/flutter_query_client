@@ -33,9 +33,18 @@ class App extends StatelessWidget {
         },
       ),
       child: MaterialApp(
-        title: 'Query Tester',
+        title: 'Query Client',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+        theme: ThemeData(
+          colorSchemeSeed: Colors.indigo,
+          useMaterial3: true,
+        ),
+        darkTheme: ThemeData(
+          colorSchemeSeed: Colors.indigo,
+          brightness: Brightness.dark,
+          useMaterial3: true,
+        ),
+        themeMode: ThemeMode.dark,
         home: const HomeScreen(),
       ),
     );
