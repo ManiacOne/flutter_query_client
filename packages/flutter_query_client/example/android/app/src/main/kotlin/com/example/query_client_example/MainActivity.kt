@@ -1,4 +1,4 @@
-package com.example.flutter_query_tester
+package com.example.query_client_example
 
 import io.flutter.embedding.android.FlutterActivity
 

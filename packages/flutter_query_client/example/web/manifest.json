@@ -1,6 +1,6 @@
 {
-    "name": "flutter_query_tester",
-    "short_name": "flutter_query_tester",
+    "name": "Query Client",
+    "short_name": "Query Client",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

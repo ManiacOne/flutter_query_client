@@ -1,5 +1,5 @@
-name: flutter_query_tester
-description: "A new Flutter project."
+name: query_client_example
+description: "Example app for flutter_query_client package."
 publish_to: 'none'
 version: 0.1.0
 

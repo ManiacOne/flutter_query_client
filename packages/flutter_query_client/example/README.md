@@ -1,3 +1,3 @@
-# flutter_query_tester
+# Query Client
 
 A new Flutter project.
