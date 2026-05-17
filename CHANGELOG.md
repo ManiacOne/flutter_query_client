@@ -1,14 +1,10 @@
-## 1.1.0
+## 1.0.1
 
-### Features
+### Fixes
 
-* **keepPreviousData** — override `keepPreviousData` on `QueryController` or `InfiniteQueryController` to retain previous data while new data is loading, similar to TanStack Query's `placeholderData`. No UI changes required; `QueryState.isPlaceholderData` indicates when stale data is being shown
-* **onSuccess / onQueryError hooks** — override `onSuccess` and `onQueryError` directly on `QueryController` and `InfiniteQueryController`, consistent with the existing hooks on `MutationController`
-* **transformError getter** — override `transformError` per-controller to map raw exceptions into typed error objects before they reach the state
-
-### Bug Fixes
-
-* Fixed `InfiniteQueryController.setParams()` getting stuck in a loading state when params changed rapidly — new params now immediately reset the query state so the next fetch is never blocked by an in-flight request
+* Removed unnecessary `package:meta/meta.dart` import from `QueryController` and `InfiniteQueryController` — elements are already available via `package:flutter/foundation.dart`
+* Removed `@internal` annotation from `handleRemount()` in both controllers
+* Fixed unresolved dartdoc references in `QueryLogger` and `RefetchOnMount` — replaced `[Logger.root.onRecord]` and `[staleTime]` with backtick code spans
 
 ---
 
