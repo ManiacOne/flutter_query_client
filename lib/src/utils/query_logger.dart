@@ -33,7 +33,7 @@ class QueryLogger {
   ///
   /// [level] controls the minimum severity level to log. Default is [Level.ALL].
   /// [onLog] is an optional custom handler. If not provided, logs are printed
-  /// to the console using [Logger.root.onRecord].
+  /// to the console via `Logger.root.onRecord`.
   static void enable({
     Level? level,
     void Function(LogRecord record)? onLog,
