@@ -83,10 +83,14 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
   // ─── Error transform ────────────────────────────────────────────
 
+  /// Override to transform errors at the controller level.
+  /// Falls back to the global transform in [QueryDefaults.transformError].
+  ErrorTransformer? get transformError => _transformError;
+
   Object _applyTransformError(Object error) {
     return applyErrorTransform(
       error: error,
-      controllerTransform: _transformError,
+      controllerTransform: transformError,
       globalTransform: client.defaults.transformError,
     );
   }
@@ -129,6 +133,19 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
   /// Controls whether this query refetches when network connectivity is restored.
   RefetchOnReconnect get refetchOnReconnect => RefetchOnReconnect.ifStale;
+
+  /// When true, keeps the previous data visible (with [QueryState.isPlaceholderData]
+  /// set to true) while fetching new data after a [setParams] call.
+  /// Similar to TanStack Query's `keepPreviousData` / `placeholderData`.
+  bool get keepPreviousData => false;
+
+  // ─── Lifecycle hooks (override to customize) ─────────────────────
+
+  /// Called after a successful fetch, refetch, or loadMore.
+  void onSuccess(List<T> data) {}
+
+  /// Called after a failed fetch, refetch, or loadMore.
+  void onQueryError(Object error) {}
 
   // ─── Resolved defaults (controller override → global → hardcoded) ─
 
@@ -233,6 +250,10 @@ abstract class InfiniteQueryController<T, PageParam, P>
     final bool filtersChanged = _isInitialized && oldSerialized != newSerialized;
 
     if (filtersChanged) {
+      // Capture previous data before clearing for keepPreviousData.
+      final previousData =
+          keepPreviousData && _pages.isNotEmpty ? List<T>.from(_flatData) : null;
+
       _saveToCache();
 
       _unregisterConnectivity();
@@ -259,6 +280,18 @@ abstract class InfiniteQueryController<T, PageParam, P>
           data: _flatData,
         ));
         return;
+      }
+
+      // Emit placeholder data or reset to idle so _executeFirstPage
+      // doesn't short-circuit on state.isLoading from a previous call.
+      if (previousData != null && previousData.isNotEmpty) {
+        _safeEmit(QueryState<List<T>>(
+          status: QueryStatus.success,
+          data: previousData,
+          isPlaceholderData: true,
+        ));
+      } else {
+        _safeEmit(const QueryState());
       }
     } else {
       _filters = params;
@@ -364,7 +397,12 @@ abstract class InfiniteQueryController<T, PageParam, P>
     final capturedVersion = _filterVersion;
 
     await Future.delayed(Duration.zero);
-    _safeEmit(const QueryState(status: QueryStatus.loading));
+
+    // keepPreviousData: if setParams already placed placeholder data, keep it
+    // visible instead of flashing a loading spinner.
+    if (!state.isPlaceholderData) {
+      _safeEmit(const QueryState(status: QueryStatus.loading));
+    }
 
     try {
       final pageData = await retryWithBackoff<List<T>>(
@@ -391,12 +429,15 @@ abstract class InfiniteQueryController<T, PageParam, P>
         status: QueryStatus.success,
         data: _flatData,
       ));
+      onSuccess(_flatData);
     } catch (e) {
       if (capturedVersion != _filterVersion) return;
+      final transformed = _applyTransformError(e);
       _safeEmit(state.copyWith(
         status: QueryStatus.error,
-        error: _applyTransformError(e),
+        error: transformed,
       ));
+      onQueryError(transformed);
     }
   }
 
@@ -492,12 +533,15 @@ abstract class InfiniteQueryController<T, PageParam, P>
         status: QueryStatus.success,
         data: _flatData,
       ));
+      onSuccess(_flatData);
     } catch (e) {
       if (capturedVersion != _filterVersion) return;
+      final transformed = _applyTransformError(e);
       _safeEmit(state.copyWith(
-        error: _applyTransformError(e),
+        error: transformed,
         isLoadingMore: false,
       ));
+      onQueryError(transformed);
     }
   }
 
@@ -543,12 +587,15 @@ abstract class InfiniteQueryController<T, PageParam, P>
         status: QueryStatus.success,
         data: _flatData,
       ));
+      onSuccess(_flatData);
     } catch (e) {
       if (capturedVersion != _filterVersion) return;
+      final transformed = _applyTransformError(e);
       _safeEmit(state.copyWith(
-        error: _applyTransformError(e),
+        error: transformed,
         fetchStatus: FetchStatus.idle,
       ));
+      onQueryError(transformed);
     }
   }
 

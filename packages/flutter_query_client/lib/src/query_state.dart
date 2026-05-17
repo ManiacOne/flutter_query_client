@@ -14,6 +14,7 @@ abstract class QueryState<V> with _$QueryState<V> {
     @Default(FetchStatus.idle) FetchStatus fetchStatus,
     @Default(false) bool isStale,
     @Default(false) bool isLoadingMore,
+    @Default(false) bool isPlaceholderData,
   }) = _QueryState<V>;
 
   // ─── Convenience getters ─────────────────────────────────────────

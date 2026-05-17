@@ -76,10 +76,14 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
 
   // ─── Error transform ────────────────────────────────────────────
 
+  /// Override to transform errors at the controller level.
+  /// Falls back to the global transform in [QueryDefaults.transformError].
+  ErrorTransformer? get transformError => _transformError;
+
   Object _applyTransformError(Object error) {
     return applyErrorTransform(
       error: error,
-      controllerTransform: _transformError,
+      controllerTransform: transformError,
       globalTransform: client.defaults.transformError,
     );
   }
@@ -122,6 +126,19 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
   /// - [RefetchOnReconnect.never]: Never auto-refetch on reconnect.
   RefetchOnReconnect get refetchOnReconnect => RefetchOnReconnect.ifStale;
 
+  /// When true, keeps the previous data visible (with [QueryState.isPlaceholderData]
+  /// set to true) while fetching new data after a [setParams] call.
+  /// Similar to TanStack Query's `keepPreviousData` / `placeholderData`.
+  bool get keepPreviousData => false;
+
+  // ─── Lifecycle hooks (override to customize) ─────────────────────
+
+  /// Called after a successful fetch or refetch.
+  void onSuccess(T data) {}
+
+  /// Called after a failed fetch or refetch.
+  void onQueryError(Object error) {}
+
   // ─── Resolved defaults (controller override → global → hardcoded) ─
 
   Duration? get _resolvedStaleTime => staleTime ?? client.defaults.staleTime;
@@ -143,8 +160,9 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
   bool get _shouldPause {
     final mode = _resolvedNetworkMode;
     if (mode == NetworkMode.always) return false;
-    if (mode == NetworkMode.offlineFirst && !_offlineFirstExecuted)
+    if (mode == NetworkMode.offlineFirst && !_offlineFirstExecuted) {
       return false;
+    }
     return !client.isOnline;
   }
 
@@ -293,7 +311,20 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
     await Future.delayed(Duration.zero);
     if (_serializedParams != capturedSerialized) return; // params changed
     QueryLogger.info('[$cacheKey] Fetching...');
-    _safeEmit(const QueryState(status: QueryStatus.loading));
+
+    // keepPreviousData: show old data with isPlaceholderData flag while fetching
+    final previousData = state.data;
+    if (keepPreviousData && previousData != null) {
+      _safeEmit(QueryState<T>(
+        status: QueryStatus.success,
+        data: previousData,
+        isPlaceholderData: true,
+        fetchStatus: FetchStatus.fetching,
+      ));
+    } else {
+      _safeEmit(const QueryState(status: QueryStatus.loading));
+    }
+
     try {
       final result = await retryWithBackoff<T>(
         fn: () => queryFn(capturedParams),
@@ -323,18 +354,21 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       QueryLogger.info('[$cacheKey] Fetch success');
       _safeEmit(QueryState<T>(status: QueryStatus.success, data: result));
       if (!completer.isCompleted) completer.complete(result);
+      onSuccess(result);
     } catch (e) {
       if (_serializedParams != capturedSerialized) return;
+      final transformed = _applyTransformError(e);
       QueryLogger.severe('[$cacheKey] Fetch failed', e);
       _safeEmit(
         QueryState<T>(
           status: QueryStatus.error,
-          error: _applyTransformError(e),
+          error: transformed,
         ),
       );
       if (!completer.isCompleted) completer.completeError(e);
       // Ensure the completer's future error doesn't go unhandled.
       completer.future.ignore();
+      onQueryError(transformed);
     } finally {
       if (_inFlightFetch == completer) _inFlightFetch = null;
     }
@@ -502,13 +536,16 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
           isStale: false,
         ),
       );
+      onSuccess(result);
     } catch (e) {
+      final transformed = _applyTransformError(e);
       _safeEmit(
         state.copyWith(
-          error: _applyTransformError(e),
+          error: transformed,
           fetchStatus: FetchStatus.idle,
         ),
       );
+      onQueryError(transformed);
     }
   }
 
