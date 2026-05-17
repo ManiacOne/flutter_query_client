@@ -27,7 +27,7 @@ Handles **fetching, caching, synchronizing, and updating** server state with min
 
 ```yaml
 dependencies:
-  flutter_query_client: ^1.0.0
+  flutter_query_client: ^1.0.1
 ```
 
 ---
