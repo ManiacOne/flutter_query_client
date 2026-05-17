@@ -14,11 +14,13 @@ class ProductsInfiniteController
   RefetchOnMount get refetchOnMount => RefetchOnMount.never;
 
   @override
+  bool get keepPreviousData => true;
+
+  @override
   int get initialPageParam => 0;
 
   @override
-  int? getNextPageParam(
-      List<Product> lastPage, List<List<Product>> allPages) {
+  int? getNextPageParam(List<Product> lastPage, List<List<Product>> allPages) {
     if (lastPage.length < limit) return null;
     return allPages.length;
   }
@@ -43,12 +45,34 @@ class ProductsInfiniteController
 
   @override
   int get limit => 10;
+
+  // Lifecycle hook: called after every successful fetch/refetch/loadMore.
+  @override
+  void onSuccess(List<Product> data) {
+    QueryLogger.info('[Products] Loaded ${data.length} items');
+  }
+
+  // Lifecycle hook: called after a failed fetch — good for analytics/logging.
+  @override
+  void onQueryError(Object error) {
+    QueryLogger.warning('[Products] Fetch failed: $error');
+  }
 }
 
 // ── Single-item query controller ──────────────────────────────────
 
+/// Demonstrates per-controller staleTime and refetchOnReconnect overrides.
 class ProductByIdController extends QueryController<Product, int> {
   ProductByIdController() : super('product');
+
+  // Product detail goes stale after 30 seconds — shorter than the global 5 min.
+  @override
+  Duration? get staleTime => const Duration(seconds: 30);
+
+  // Always refetch product detail when the device reconnects, even if fresh —
+  // price and stock can change frequently.
+  @override
+  RefetchOnReconnect get refetchOnReconnect => RefetchOnReconnect.always;
 
   @override
   Future<Product> queryFn(int? id) => productService.getProductById(id!);
