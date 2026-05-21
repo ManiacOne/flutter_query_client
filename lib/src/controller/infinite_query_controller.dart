@@ -362,7 +362,9 @@ abstract class InfiniteQueryController<T, PageParam, P>
     _isInitialized = true;
 
     if (_pages.isEmpty && _restoreFromCache(_filters)) {
+      final capturedVersionCache = _filterVersion;
       await Future.delayed(Duration.zero);
+      if (capturedVersionCache != _filterVersion) return;
       final cached = client.get<List<List<T>>>(
         cacheKey,
         _serializeFilters(_filters),
@@ -387,7 +389,9 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
     // Check network before fetching.
     if (_shouldPause) {
+      final capturedVersionPause = _filterVersion;
       await Future.delayed(Duration.zero);
+      if (capturedVersionPause != _filterVersion) return;
       _safeEmit(state.copyWith(fetchStatus: FetchStatus.paused));
       return;
     }
@@ -525,6 +529,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _invalidateFlat();
       _saveToCache();
       _registerStaleListener();
+      _startRefetchInterval();
 
       _safeEmit(QueryState<List<T>>(
         status: QueryStatus.success,
