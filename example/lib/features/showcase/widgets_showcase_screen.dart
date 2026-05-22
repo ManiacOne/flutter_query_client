@@ -576,11 +576,11 @@ MultiQueryListener(
         _DemoCard(
           widgetName: 'QueryObserver',
           child: const _CodeLabel('''
-// main.dart — no flutter_bloc import needed
-void main() {
-  QueryClient.instance.setObserver(AppQueryObserver());
-  runApp(const App());
-}
+QueryClientProvider(
+      client: QueryClient.instance,
+      observer: AppQueryObserver(),
+      child: MaterialApp(...),
+)
 
 class AppQueryObserver extends QueryObserver {
   // Called when any QueryController / InfiniteQueryController /
