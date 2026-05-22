@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:bloc/bloc.dart' show Bloc, BlocObserver;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_query_client/src/enums/network_mode.dart';
 import 'package:flutter_query_client/src/enums/refetch_on_reconnect.dart';
@@ -52,6 +53,19 @@ class QueryClient {
 
   void setDefaults(QueryDefaults defaults) {
     _defaults = defaults;
+  }
+
+  /// Register a [QueryObserver] to receive typed lifecycle events from every
+  /// [QueryController], [InfiniteQueryController], and [MutationController].
+  ///
+  /// Internally sets [Bloc.observer], so no direct `flutter_bloc` dependency
+  /// is required in your app. Pass a [QueryObserver] subclass:
+  ///
+  /// ```dart
+  /// QueryClient.instance.setObserver(AppQueryObserver());
+  /// ```
+  void setObserver(BlocObserver observer) {
+    Bloc.observer = observer;
   }
 
   // ─── Network connectivity ────────────────────────────────────────

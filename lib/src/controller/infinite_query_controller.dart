@@ -23,8 +23,12 @@ import 'package:flutter_query_client/src/utils/stale_listener_handle.dart';
 /// `String` for cursors).
 /// [P] is the filters type (`void` for no-filter queries).
 ///
-/// Subclasses must implement [queryFn], [initialPageParam], and
-/// [getNextPageParam].
+/// Subclasses must implement [queryFn] and [getNextPageParam].
+///
+/// [initialPageParam] and [limit] are optional — they fall back to
+/// [QueryDefaults.initialPageParam] (default `0`) and
+/// [QueryDefaults.limit] (default `20`) respectively, so they only need
+/// to be overridden when the controller differs from the global default.
 abstract class InfiniteQueryController<T, PageParam, P>
     extends Cubit<QueryState<List<T>>> {
   final String cacheKey;
@@ -98,8 +102,14 @@ abstract class InfiniteQueryController<T, PageParam, P>
   /// Fetch a single page of data for the given [pageParam].
   Future<List<T>> queryFn(PageParam pageParam, P? filters);
 
-  /// The initial page parameter (e.g., `0` for page numbers, `''` for cursors).
-  PageParam get initialPageParam;
+  /// The first page parameter passed to [queryFn] on the initial fetch.
+  ///
+  /// Defaults to [QueryDefaults.initialPageParam] (`0` unless overridden
+  /// globally). Override this in a subclass only when the controller uses a
+  /// different starting value — e.g. `1` for one-indexed APIs or `''` for
+  /// cursor-based APIs.
+  PageParam get initialPageParam =>
+      client.defaults.initialPageParam as PageParam;
 
   /// Derive the next page parameter from the last fetched page and all pages.
   /// Return `null` to signal "no more pages."
@@ -111,8 +121,12 @@ abstract class InfiniteQueryController<T, PageParam, P>
   /// Whether to background-refetch when mounting with cached data.
   RefetchOnMount get refetchOnMount => RefetchOnMount.always;
 
-  /// Items per page (convenience — used in your queryFn/getNextPageParam).
-  int get limit => 20;
+  /// Items per page — used as a convenience value in [queryFn] and
+  /// [getNextPageParam].
+  ///
+  /// Defaults to [QueryDefaults.limit] (`20` unless overridden globally).
+  /// Override in a subclass to use a different page size for this controller.
+  int get limit => client.defaults.limit;
 
   /// How long data is considered fresh.
   Duration? get staleTime => null;

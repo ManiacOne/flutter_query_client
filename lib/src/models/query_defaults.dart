@@ -26,6 +26,22 @@ class QueryDefaults {
   final NetworkMode? networkMode;
   final RefetchOnReconnect? refetchOnReconnect;
 
+  /// The default first-page parameter for every [InfiniteQueryController]
+  /// that does not override [InfiniteQueryController.initialPageParam].
+  ///
+  /// Defaults to `0` (zero-indexed integer pages). Set to `1` for
+  /// one-indexed APIs, or to a [String] / custom type for cursor-based
+  /// APIs — then also override [initialPageParam] in each controller whose
+  /// [PageParam] type differs from the global default.
+  final dynamic initialPageParam;
+
+  /// The default page size for every [InfiniteQueryController] that does
+  /// not override [InfiniteQueryController.limit].
+  ///
+  /// Defaults to `20`. Set this once here instead of repeating it in every
+  /// controller subclass.
+  final int limit;
+
   /// Custom endpoints for internet reachability checks.
   ///
   /// By default, `internet_connection_checker_plus` checks Cloudflare,
@@ -56,6 +72,8 @@ class QueryDefaults {
     this.transformError,
     this.networkMode,
     this.refetchOnReconnect,
+    this.initialPageParam = 0,
+    this.limit = 20,
     this.connectivityEndpoints,
     this.enableLogging = false,
     this.logLevel,
