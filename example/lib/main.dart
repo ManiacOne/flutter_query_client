@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
+import 'package:query_client_example/app_observer.dart';
 import 'home_screen.dart';
 
 void main() {
@@ -13,11 +14,16 @@ class App extends StatelessWidget {
   Widget build(BuildContext context) {
     return QueryClientProvider(
       client: QueryClient.instance,
+      // Register a global QueryObserver — extends BlocObserver, so it receives
+      // lifecycle events from every QueryController, InfiniteQueryController,
+      // and MutationController automatically. No manual instrumentation needed.
+      observer: AppQueryObserver(),
       defaults: QueryDefaults(
         staleTime: Duration(minutes: 5),
         gcTime: Duration(minutes: 10),
         retryCount: 3,
         enableLogging: true,
+        initialPageParam: 0,
         connectivityEndpoints: [
           InternetCheckOption(
             uri: Uri.parse('https://jsonplaceholder.typicode.com/todos/1'),
@@ -35,10 +41,7 @@ class App extends StatelessWidget {
       child: MaterialApp(
         title: 'Query Client',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorSchemeSeed: Colors.indigo,
-          useMaterial3: true,
-        ),
+        theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
         darkTheme: ThemeData(
           colorSchemeSeed: Colors.indigo,
           brightness: Brightness.dark,

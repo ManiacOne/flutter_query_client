@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'features/posts/posts_list_screen.dart';
 import 'features/products/products_paginated_screen.dart';
+import 'features/showcase/widgets_showcase_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -30,9 +31,18 @@ class _HomeScreenState extends State<HomeScreen> {
       selectedIcon: Icon(Icons.storefront),
       label: 'Products',
     ),
+    NavigationDestination(
+      icon: Icon(Icons.widgets_outlined),
+      selectedIcon: Icon(Icons.widgets),
+      label: 'Widgets',
+    ),
   ];
 
-  static const _screens = [PostsListScreen(), ProductsPaginatedScreen()];
+  static const _screens = [
+    PostsListScreen(),
+    ProductsPaginatedScreen(),
+    WidgetsShowcaseScreen(),
+  ];
 
   @override
   Widget build(BuildContext context) {

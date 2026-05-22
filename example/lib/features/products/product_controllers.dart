@@ -17,9 +17,6 @@ class ProductsInfiniteController
   bool get keepPreviousData => true;
 
   @override
-  int get initialPageParam => 0;
-
-  @override
   int? getNextPageParam(List<Product> lastPage, List<List<Product>> allPages) {
     if (lastPage.length < limit) return null;
     return allPages.length;
