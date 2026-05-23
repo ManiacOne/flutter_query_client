@@ -69,9 +69,8 @@
 
 ### Notes
 
-* **`QueryClient.updateInfiniteQuery<T>`** — the method is correctly typed and functional, but does **not** notify active `InfiniteQueryController` instances observing the same key. Two patterns for keeping the live controller in sync:
-  1. **Preferred (controller reachable via `BuildContext`)** — call the controller's own helpers directly: `prependItem`, `appendItem`, `updateItem`, or `removeItem`. These patch `_flatCache` in O(1) and emit a new state immediately. `updateInfiniteQuery` is then optional (use it only to warm the cache for future mounts with `refetchOnMount: never`).
-  2. **No `BuildContext` available** (background service, push notification handler) — call `updateInfiniteQuery` to write the cache, then `invalidateQueries(['key'])` to trigger a refetch on any active controller.
+* **`QueryClient.updateInfiniteQuery<T>`** — 
+  1. **Preferred (controller reachable via `BuildContext`)** — call the controller's own helpers directly: `prependItem`, `appendItem`, `updateItem`, or `removeItem`. These patch `_flatCache` in O(1) and emit a new state immediately. `updateInfiniteQuery` is then optional (use it when provider access is not present in the context - and you will see changes when navigated to desired page).
 
 ### Example
 
