@@ -52,17 +52,18 @@ class _ProductDetailView extends StatelessWidget {
         actions: [
           // Live status badge inside AppBar — uses QueryBuilder in actions
           QueryBuilder<ProductByIdController, Product>(
-            builder: (context, state) => Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Center(
-                child: QueryStatusBadge(
-                  isPaused: state.isPaused,
-                  isRefetching: state.isRefetching,
-                  isStale: state.isStale,
-                  isSuccess: state.isSuccess,
+            builder:
+                (context, state) => Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Center(
+                    child: QueryStatusBadge(
+                      isPaused: state.isPaused,
+                      isRefetching: state.isRefetching,
+                      isStale: state.isStale,
+                      isSuccess: state.isSuccess,
+                    ),
+                  ),
                 ),
-              ),
-            ),
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -86,8 +87,8 @@ class _ProductDetailView extends StatelessWidget {
                   Text('${state.error}', textAlign: TextAlign.center),
                   const SizedBox(height: 16),
                   FilledButton.icon(
-                    onPressed: () =>
-                        context.query<ProductByIdController>().refetch(),
+                    onPressed:
+                        () => context.query<ProductByIdController>().refetch(),
                     icon: const Icon(Icons.refresh),
                     label: const Text('Retry'),
                   ),
@@ -150,7 +151,9 @@ class _ProductDetailView extends StatelessWidget {
                       right: 12,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: cs.primary,
                           borderRadius: BorderRadius.circular(20),
@@ -215,17 +218,20 @@ class _ProductDetailView extends StatelessWidget {
                           ),
                           _Chip(
                             icon: Icons.inventory_2_outlined,
-                            label: p.stock > 0
-                                ? '${p.stock} in stock'
-                                : 'Out of stock',
-                            color: p.stock > 10
-                                ? Colors.green.withValues(alpha: 0.15)
-                                : p.stock > 0
+                            label:
+                                p.stock > 0
+                                    ? '${p.stock} in stock'
+                                    : 'Out of stock',
+                            color:
+                                p.stock > 10
+                                    ? Colors.green.withValues(alpha: 0.15)
+                                    : p.stock > 0
                                     ? Colors.orange.withValues(alpha: 0.15)
                                     : cs.errorContainer,
-                            textColor: p.stock > 10
-                                ? Colors.green
-                                : p.stock > 0
+                            textColor:
+                                p.stock > 10
+                                    ? Colors.green
+                                    : p.stock > 0
                                     ? Colors.orange
                                     : cs.onErrorContainer,
                           ),
@@ -238,9 +244,9 @@ class _ProductDetailView extends StatelessWidget {
                       Text(
                         'Description',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              color: cs.onSurface.withValues(alpha: 0.5),
-                              letterSpacing: 0.5,
-                            ),
+                          color: cs.onSurface.withValues(alpha: 0.5),
+                          letterSpacing: 0.5,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(
@@ -261,12 +267,16 @@ class _ProductDetailView extends StatelessWidget {
                             color: Colors.amber.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                                color: Colors.amber.withValues(alpha: 0.4)),
+                              color: Colors.amber.withValues(alpha: 0.4),
+                            ),
                           ),
                           child: const Row(
                             children: [
-                              Icon(Icons.timelapse,
-                                  size: 16, color: Colors.amber),
+                              Icon(
+                                Icons.timelapse,
+                                size: 16,
+                                color: Colors.amber,
+                              ),
                               SizedBox(width: 8),
                               Expanded(
                                 child: Text(

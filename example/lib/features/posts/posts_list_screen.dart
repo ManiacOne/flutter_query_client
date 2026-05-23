@@ -3,7 +3,6 @@ import 'package:flutter_query_client/flutter_query_client.dart';
 import '../../shared.dart';
 import 'post_controllers.dart';
 import 'post_model.dart';
-import 'post_service.dart';
 import 'post_detail_screen.dart';
 import 'post_form_screen.dart';
 
@@ -84,9 +83,7 @@ class _PostsListViewState extends State<_PostsListView> {
     );
     if (confirmed != true || !mounted) return;
 
-    await _deleteMutation.mutate(
-      () => postService.deletePost(post.id).then((_) => true),
-    );
+    await _deleteMutation.mutate(post.id);
 
     if (!mounted) return;
     if (_deleteMutation.state.error != null) {
@@ -106,8 +103,11 @@ class _PostsListViewState extends State<_PostsListView> {
         SnackBar(
           content: Row(
             children: [
-              const Icon(Icons.check_circle_outline,
-                  color: Colors.white, size: 16),
+              const Icon(
+                Icons.check_circle_outline,
+                color: Colors.white,
+                size: 16,
+              ),
               const SizedBox(width: 8),
               Text('Post #${post.id} removed from cache (optimistic)'),
             ],
@@ -119,30 +119,10 @@ class _PostsListViewState extends State<_PostsListView> {
   }
 
   Future<void> _openCreate() async {
-    final created = await Navigator.push<Post>(
+    await Navigator.push<Post>(
       context,
       MaterialPageRoute(builder: (_) => const PostFormScreen()),
     );
-    if (created != null && mounted) {
-      // Prepend to the cached list so it appears at the top immediately.
-      // This is an optimistic update — no refetch required.
-      context.query<PostsQueryController>().updateCache(
-        (posts) => posts != null ? [created, ...posts] : [created],
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.add_circle_outline,
-                  color: Colors.white, size: 16),
-              const SizedBox(width: 8),
-              const Text('Post prepended to cache (optimistic)'),
-            ],
-          ),
-          backgroundColor: Colors.green.shade700,
-        ),
-      );
-    }
   }
 
   static const _userColors = [
@@ -184,26 +164,14 @@ class _PostsListViewState extends State<_PostsListView> {
           // ── Feature banner ─────────────────────────────────────
           FeatureBanner(
             features: [
-              FeatureItem(
-                Icons.sync,
-                'refetchInterval: 60s',
-                Colors.blue,
-              ),
-              FeatureItem(
-                Icons.bolt,
-                'Optimistic cache',
-                Colors.purple,
-              ),
+              FeatureItem(Icons.sync, 'refetchInterval: 60s', Colors.blue),
+              FeatureItem(Icons.bolt, 'Optimistic cache', Colors.purple),
               FeatureItem(
                 Icons.notifications_outlined,
                 'Lifecycle hooks',
                 Colors.orange,
               ),
-              FeatureItem(
-                Icons.wifi_off,
-                'NetworkMode.online',
-                Colors.teal,
-              ),
+              FeatureItem(Icons.wifi_off, 'NetworkMode.online', Colors.teal),
             ],
           ),
 
@@ -251,8 +219,7 @@ class _PostsListViewState extends State<_PostsListView> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.error_outline,
-                            size: 48, color: cs.error),
+                        Icon(Icons.error_outline, size: 48, color: cs.error),
                         const SizedBox(height: 12),
                         Text(
                           'Failed to load posts',
@@ -269,8 +236,11 @@ class _PostsListViewState extends State<_PostsListView> {
                         ),
                         const SizedBox(height: 16),
                         FilledButton.icon(
-                          onPressed: () =>
-                              context.query<PostsQueryController>().refetch(),
+                          onPressed:
+                              () =>
+                                  context
+                                      .query<PostsQueryController>()
+                                      .refetch(),
                           icon: const Icon(Icons.refresh),
                           label: const Text('Retry'),
                         ),
@@ -298,8 +268,9 @@ class _PostsListViewState extends State<_PostsListView> {
                         children: [
                           Text(
                             '${posts.length} posts',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
+                            style: Theme.of(
+                              context,
+                            ).textTheme.bodySmall?.copyWith(
                               color: cs.onSurface.withValues(alpha: 0.5),
                             ),
                           ),
@@ -343,8 +314,11 @@ class _PostsListViewState extends State<_PostsListView> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.wifi_off,
-                                size: 14, color: Colors.orange),
+                            const Icon(
+                              Icons.wifi_off,
+                              size: 14,
+                              color: Colors.orange,
+                            ),
                             const SizedBox(width: 8),
                             const Text(
                               'Offline — showing cached data',
@@ -361,19 +335,24 @@ class _PostsListViewState extends State<_PostsListView> {
                     Expanded(
                       child: ListView.separated(
                         itemCount: posts.length,
-                        separatorBuilder: (_, __) =>
-                            Divider(height: 1, color: cs.outline.withValues(alpha: 0.2)),
+                        separatorBuilder:
+                            (_, __) => Divider(
+                              height: 1,
+                              color: cs.outline.withValues(alpha: 0.2),
+                            ),
                         itemBuilder: (context, i) {
                           final post = posts[i];
                           final userColor = _colorForUser(post.userId);
                           return InkWell(
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    PostDetailScreen(postId: post.id),
-                              ),
-                            ),
+                            onTap:
+                                () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder:
+                                        (_) =>
+                                            PostDetailScreen(postId: post.id),
+                                  ),
+                                ),
                             child: Row(
                               children: [
                                 // Colored user accent strip
@@ -393,8 +372,9 @@ class _PostsListViewState extends State<_PostsListView> {
                                         // User avatar
                                         CircleAvatar(
                                           radius: 18,
-                                          backgroundColor:
-                                              userColor.withValues(alpha: 0.15),
+                                          backgroundColor: userColor.withValues(
+                                            alpha: 0.15,
+                                          ),
                                           child: Text(
                                             '#${post.userId}',
                                             style: TextStyle(
@@ -437,7 +417,9 @@ class _PostsListViewState extends State<_PostsListView> {
                                         IconButton(
                                           icon: Icon(
                                             Icons.delete_outline,
-                                            color: cs.error.withValues(alpha: 0.7),
+                                            color: cs.error.withValues(
+                                              alpha: 0.7,
+                                            ),
                                             size: 20,
                                           ),
                                           onPressed: () => _delete(post),

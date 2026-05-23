@@ -26,7 +26,7 @@ Handles **fetching, caching, synchronizing, and updating** server state with min
 
 ```yaml
 dependencies:
-  flutter_query_client: ^1.2.0
+  flutter_query_client: ^2.0.0
 ```
 
 ---
@@ -175,22 +175,19 @@ InfiniteQueryProvider<ProductsController>(
 
 ### `MultiQueryProvider`
 
-Provide multiple controllers without deep nesting. Providers are applied top-to-bottom (first entry = outermost ancestor).
+Provide multiple controllers without deep nesting — identical ergonomics to `MultiBlocProvider`. Pass each provider without a `child`; `MultiQueryProvider` injects it automatically. Providers are applied top-to-bottom (first entry = outermost ancestor).
 
 ```dart
 MultiQueryProvider(
   providers: [
-    (child) => QueryProvider<PostsController, List<Post>>(
+    QueryProvider<PostsController, List<Post>>(
       create: (_) => PostsController(),
-      child: child,
     ),
-    (child) => QueryProvider<CreatePostMutation, Post>(
+    QueryProvider<CreatePostMutation, Post>(
       create: (_) => CreatePostMutation(),
-      child: child,
     ),
-    (child) => InfiniteQueryProvider<ProductsController>(
+    InfiniteQueryProvider<ProductsController>(
       create: (_) => ProductsController(),
-      child: child,
     ),
   ],
   child: const HomeScreen(),
@@ -513,10 +510,22 @@ controller.filters      // P?  — current filter params
 
 ## MutationController
 
-For create / update / delete operations. Mutations use `QueryState<T>` as their state, so every Query\* widget works with them.
+For create / update / delete operations. Takes a typed params generic `P` matching `QueryController<T, P>`. Override `mutationFn(P params)` — no closures needed. Mutations emit `QueryState<T>`, so every Query\* widget works with them out of the box.
 
 ```dart
-class CreatePostMutation extends MutationController<Post> {
+// Define a record typedef for the params (Dart 3 named records work well).
+typedef CreatePostParams = ({int userId, String title, String body});
+
+class CreatePostMutation extends MutationController<Post, CreatePostParams> {
+  @override
+  Future<Post> mutationFn(CreatePostParams params) {
+    return postService.createPost(
+      userId: params.userId,
+      title: params.title,
+      body: params.body,
+    );
+  }
+
   @override
   void onSuccess(Post data) => QueryLogger.info('Created: ${data.id}');
 
@@ -525,6 +534,15 @@ class CreatePostMutation extends MutationController<Post> {
 
   @override
   void onSettled(Post? data, Object? error) { /* always called */ }
+}
+
+// For mutations that need no params, use void as the second type argument.
+class DeletePostMutation extends MutationController<bool, int> {
+  @override
+  Future<bool> mutationFn(int id) async {
+    await postService.deletePost(id);
+    return true;
+  }
 }
 ```
 
@@ -535,11 +553,15 @@ QueryProvider<CreatePostMutation, Post>(
   child: const CreatePostForm(),
 )
 
-// Trigger
-mutation.mutate(() => postService.createPost(title: title, body: body, userId: 1));
+// Trigger with typed named-record params
+context.query<CreatePostMutation>().mutate((
+  userId: 1,
+  title: 'Hello',
+  body: 'World',
+));
 
 // Reset state to idle
-mutation.reset();
+context.query<CreatePostMutation>().reset();
 
 // Use standard query widgets — mutations emit QueryState<T>
 QueryConsumer<CreatePostMutation, Post>(
@@ -558,6 +580,7 @@ QueryConsumer<CreatePostMutation, Post>(
 
 | Override | Default | Purpose |
 |---|---|---|
+| `mutationFn(P params)` | — | **Required.** The mutation function; receives typed params |
 | `retryCount` | `0` | Global `retryCount` intentionally not applied to mutations |
 | `onSuccess(T data)` | no-op | Called after mutation succeeds |
 | `onMutationError(Object e)` | no-op | Called after mutation fails |
@@ -725,6 +748,7 @@ QueryLogger.disable();
 
 A full example app demonstrating all features is in the [`example/`](example/) directory:
 
-- **Posts tab** — `QueryController`, `QueryBuilder`, `MutationController`, optimistic cache updates, background polling, offline support
-- **Products tab** — `InfiniteQueryController`, `setParams()` live search, `loadMore()` on scroll, `keepPreviousData`, optimistic item removal
+- **Posts tab** — `QueryController`, `QueryBuilder`, `MutationController<T, P>` typed params, `QueryClient.instance.update` cache patching from mutation listeners, background polling, offline support
+- **Products tab** — `InfiniteQueryController`, `setParams()` live search, `loadMore()` on scroll, `keepPreviousData`, `updateInfiniteQuery` + `prependItem` after create, optimistic item removal
 - **Widgets tab** — live showcase of every widget: `MultiQueryProvider`, `QueryConsumer`, `QuerySelector`, `InfiniteQueryListener`, `InfiniteQueryConsumer`, `InfiniteQuerySelector`, `MultiQueryListener`, `QueryObserver`, and using mutation controllers with all Query\* widgets
+- **Issues tab** — interactive before/after benchmarks for all v2.0.0 performance and memory optimizations; detailed documentation in [`example/lib/features/inefficiency_demos/OPTIMIZATIONS.md`](example/lib/features/inefficiency_demos/OPTIMIZATIONS.md)

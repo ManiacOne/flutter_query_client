@@ -1,30 +1,103 @@
-## 1.2.0
+## 2.0.0
 
 ### Breaking changes
 
-* None — all changes are backwards-compatible. Existing subclasses that already override `initialPageParam` and `limit` continue to work unchanged.
+* **`MultiQueryProvider.providers`** type changed from `List<Widget Function(Widget child)>` to `List<QueryProviderWidget>` — callers must replace builder functions with plain provider instances:
 
-### New Features
+  ```dart
+  // Before (1.2.0)
+  MultiQueryProvider(
+    providers: [
+      (child) => QueryProvider<PostsController, List<Post>>(
+        create: (_) => PostsController(), child: child,
+      ),
+    ],
+    child: HomeScreen(),
+  )
 
-* **`MultiQueryProvider`** — provide multiple query and infinite-query controllers without deep widget nesting; each entry is a builder function `Widget Function(Widget child)`, applied top-to-bottom
-* **`QueryConsumer<C, T>`** — combines `QueryBuilder` + `QueryListener` in a single widget, eliminating the need to nest them; works with `QueryController` and `MutationController`
+  // After (2.0.0)
+  MultiQueryProvider(
+    providers: [
+      QueryProvider<PostsController, List<Post>>(
+        create: (_) => PostsController(),
+      ),
+    ],
+    child: HomeScreen(),
+  )
+  ```
+
+* **`MutationController<T>` → `MutationController<T, P>`** — mutations now take a typed params generic `P`, matching the `QueryController<T, P>` pattern. Subclasses must override `mutationFn(P params)` instead of passing a closure to `mutate()`. For mutations that don't need params, use `void` as the second type argument.
+
+  ```dart
+  // Before (1.2.0)
+  class CreatePostMutation extends MutationController<Post> {
+    Future<void> create(String title) async {
+      await mutate(() => postService.createPost(title: title));
+    }
+  }
+
+  // After (2.0.0)
+  class CreatePostMutation
+      extends MutationController<Post, ({String title})> {
+    @override
+    Future<Post> mutationFn(({String title}) params) {
+      return postService.createPost(title: params.title);
+    }
+  }
+
+  // Usage: context.query<CreatePostMutation>().mutate((title: 'Hello'))
+  ```
+
+### New features
+
+* **`QueryProviderWidget`** — new public abstract base class that both `QueryProvider` and `InfiniteQueryProvider` extend, enabling `MultiQueryProvider` composition; custom provider wrappers can also extend it to participate in `MultiQueryProvider`
+* **`QueryClientProvider(observer:)`** — register a `QueryObserver` directly in `QueryClientProvider` alongside defaults and logging, keeping all global setup in one place; the constructor calls `QueryClient.setObserver` internally. `QueryClient.setObserver` remains available as a lower-level escape hatch for registering outside the widget tree
+* **`QueryDefaults.initialPageParam`** — global default first-page parameter for every `InfiniteQueryController`; defaults to `0`. Set to `1` for one-indexed APIs or any custom value for cursor-based APIs — no per-controller override needed unless that controller differs from the global default
+* **`QueryDefaults.limit`** — global default page size for every `InfiniteQueryController`; defaults to `20`. Set once in `QueryClientProvider` instead of repeating `@override int get limit => N` in every subclass
+* **`InfiniteQueryController.initialPageParam`** — no longer abstract; falls back to `QueryDefaults.initialPageParam` cast to `PageParam`. Must still be overridden when the controller's `PageParam` type or starting value differs from the global default
+* **`InfiniteQueryController.limit`** — now falls back to `QueryDefaults.limit` rather than a hardcoded `20`; override per-controller when needed
+
+### Performance & memory optimizations
+
+* **Fixed: `NetworkConnectivityObserver` StreamController leak** — the broadcast `StreamController` was eagerly allocated and never closed (singleton lifetime). It is now created lazily and tracks active listeners via `onListen`/`onCancel` callbacks. Added `listenerCount` getter for diagnostics
+* **Fixed: `QueryClient` singleton had no diagnostic visibility** — added `activeStaleTimerCount`, `activeGcTimerCount`, `activeInvalidateCallbackCount`, `activeReconnectCallbackCount`, and `cacheEntryCount` getters for debugging timer and callback leaks
+* **Fixed: dangling callback references in `QueryClient`** — if a controller was garbage-collected without `close()`, its `_onInvalidate` and `_onReconnect` callbacks persisted forever. `_notifyInvalidateCallbacks` and `_onConnectivityChange` now catch exceptions from stale callbacks and auto-prune them
+* **Fixed: unnecessary deep copies in `InfiniteQueryController._saveToCache`** — replaced `List<T>.from(p)` (O(n) element-by-element copy) with `UnmodifiableListView<T>(p)` from `dart:collection` (O(1) zero-copy wrapper). `_restoreFromCache` and `handleRemount` use `List<T>.of()` instead of `List<T>.from()` to skip per-element type checks. `handleRemount` no longer allocates a flat list just to compare lengths
+* **Fixed: flat-cache thrashing on optimistic updates** — `updateItem` now patches `_flatCache` in-place via `_flatIndexOf()` instead of nulling and rebuilding the entire flat list. `prependItem` and `appendItem` insert/add directly into `_flatCache`. Only `removeItem` (which changes list length) invalidates the cache
+* **Fixed: redundant stale-listener re-registration** — `StaleListenerHandle.register()` now returns early when params are unchanged, avoiding unnecessary `Set.remove()` + closure allocation + `Set.add()` on every fetch. Added `isRegistered` and `registeredParams` getters
+* **Fixed: redundant `isStale` cache lookups on reconnect** — `_handleReconnect()` in both `QueryController` and `InfiniteQueryController` no longer performs a redundant `client.get(key)?.isStale` lookup; `state.isStale` (maintained by the stale-timer callback) is sufficient
+
+### Notes
+
+* **`QueryClient.updateInfiniteQuery<T>`** — the method is correctly typed and functional, but does **not** notify active `InfiniteQueryController` instances observing the same key. Two patterns for keeping the live controller in sync:
+  1. **Preferred (controller reachable via `BuildContext`)** — call the controller's own helpers directly: `prependItem`, `appendItem`, `updateItem`, or `removeItem`. These patch `_flatCache` in O(1) and emit a new state immediately. `updateInfiniteQuery` is then optional (use it only to warm the cache for future mounts with `refetchOnMount: never`).
+  2. **No `BuildContext` available** (background service, push notification handler) — call `updateInfiniteQuery` to write the cache, then `invalidateQueries(['key'])` to trigger a refetch on any active controller.
+
+### Example
+
+* Added **Issues** tab to the example app with interactive before/after benchmarks for every optimization above; full documentation extracted to `example/lib/features/inefficiency_demos/OPTIMIZATIONS.md`
+* Updated **Posts** form screen to use `MutationController<T, P>` typed params, `MultiQueryListener`, and `QueryClient.instance.update` to patch the flat `'posts'` cache from within mutation listeners — no `flutter_bloc` import required
+* Updated **Products** form screen to use `MutationController<T, P>` typed params and `MultiQueryProvider` / `MultiQueryListener`; the paginated list screen demonstrates `updateInfiniteQuery` + `prependItem` to sync both the cache and the live controller after a create
+* Updated **Posts** list screen to sync the live `PostsQueryController` from the already-patched cache via `updateCache((posts) => posts)` after a create, avoiding a double-prepend
+
+---
+
+## 1.2.0
+
+### New features
+
+* **`MultiQueryProvider`** — nest multiple `QueryProvider` and `InfiniteQueryProvider` widgets without deep indentation; providers are applied top-to-bottom
+* **`QueryConsumer<C, T>`** — combines `QueryBuilder` + `QueryListener` in a single widget, eliminating the need to nest them; works with both `QueryController` and `MutationController`
 * **`InfiniteQueryConsumer<C, T>`** — same as `QueryConsumer` for infinite queries; the `List<T>` wrapper is baked into the type so only the item type is required
 * **`QuerySelector<C, T, S>`** — a `BlocSelector` scoped to `QueryState<T>`; rebuilds only when the selected derived value `S` changes, ideal for counters, flags, and other narrow slices of state
 * **`InfiniteQuerySelector<C, T, S>`** — same as `QuerySelector` for infinite queries; `List<T>` is baked in
 * **`InfiniteQueryListener<C, T>`** — mirrors `InfiniteQueryBuilder` for the listener side; eliminates the verbose `QueryListener<C, List<T>>` type annotation
-* **`QueryObserver`** — a `BlocObserver` subclass that filters events to query and mutation controllers and re-exposes them as typed, cache-key–aware hooks (`onQueryCreate`, `onQueryChange`, `onQueryError`, `onQueryClose`); `onQueryChange` receives both `currentState` and `nextState` matching standard `BlocObserver.onChange` semantics
-* **`QueryDefaults.initialPageParam`** — global default first-page parameter for every `InfiniteQueryController`; defaults to `0` so zero-indexed integer pagination requires no per-controller override. Set to `1` for one-indexed APIs or any custom value for cursor-based APIs
-* **`QueryDefaults.limit`** — global default page size for every `InfiniteQueryController`; defaults to `20`. Set once in `QueryClientProvider` instead of repeating `@override int get limit => N` in every subclass
-* **`InfiniteQueryController.initialPageParam`** — no longer abstract; falls back to `QueryDefaults.initialPageParam` cast to `PageParam`. Override in a subclass only when that controller's starting param differs from the global default
-* **`InfiniteQueryController.limit`** — now falls back to `QueryDefaults.limit` instead of a hardcoded `20`. Override per-controller when needed
-* **`QueryClientProvider(observer:)`** — register a `QueryObserver` directly in `QueryClientProvider` alongside defaults and logging, keeping all global setup in one place; the constructor calls `QueryClient.setObserver` internally
-* **`QueryClient.setObserver(BlocObserver)`** — lower-level escape hatch for registering an observer outside the widget tree; `QueryClientProvider(observer:)` is preferred at startup
-* **Mutation widgets** — `MutationController<T>` already emits `QueryState<T>`, so `QueryBuilder`, `QueryListener`, `QueryConsumer`, and `QuerySelector` all work with mutations out of the box; no separate `MutationBuilder` or `MutationListener` needed
+* **`QueryObserver`** — a `BlocObserver` subclass that filters events to query and mutation controllers and re-exposes them as typed, cache-key–aware hooks (`onQueryCreate`, `onQueryChange`, `onQueryError`, `onQueryClose`); `onQueryChange` receives both `currentState` and `nextState`, matching standard `BlocObserver.onChange` semantics
+* **Mutation widgets** — `MutationController<T>` emits `QueryState<T>`, so `QueryBuilder`, `QueryListener`, `QueryConsumer`, and `QuerySelector` all work with mutations out of the box; no separate `MutationBuilder` or `MutationListener` needed
 
 ### Example
 
-* Added a **Widgets tab** to the example app showcasing every widget in the package with live interactive demos: `MultiQueryProvider`, `QueryConsumer`, `QuerySelector`, `InfiniteQueryListener`, `InfiniteQuerySelector`, `InfiniteQueryConsumer`, `MultiQueryListener`, and `QueryObserver` (including mutations via `QueryBuilder`/`QueryListener`/`QueryConsumer`/`QuerySelector`)
-* Registered `_AppQueryObserver` in `main()` demonstrating the observer pattern end-to-end
+* Added a **Widgets** tab to the example app with live interactive demos of every widget in the package, including all mutation-controller combinations
 
 ---
 

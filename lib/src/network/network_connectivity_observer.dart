@@ -35,7 +35,20 @@ class NetworkConnectivityObserver {
   bool _isOnline = true;
   bool _isInitialized = false;
 
-  final _controller = StreamController<bool>.broadcast();
+  StreamController<bool>? _broadcastController;
+  int _activeListenerCount = 0;
+
+  StreamController<bool> get _controller {
+    if (_broadcastController == null || _broadcastController!.isClosed) {
+      _broadcastController = StreamController<bool>.broadcast(
+        onListen: () => _activeListenerCount++,
+        onCancel: () => _activeListenerCount--,
+      );
+    }
+    return _broadcastController!;
+  }
+
+  int get listenerCount => _activeListenerCount;
 
   /// Debounce duration for rapid connectivity events.
   static const _debounceDuration = Duration(milliseconds: 500);
@@ -159,7 +172,8 @@ class NetworkConnectivityObserver {
     _debounceTimer = null;
     _subscription?.cancel();
     _subscription = null;
-    _controller.close();
+    _broadcastController?.close();
+    _activeListenerCount = 0;
     _isInitialized = false;
     _instance = null;
   }

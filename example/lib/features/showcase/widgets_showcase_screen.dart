@@ -3,7 +3,6 @@ import 'package:flutter_query_client/flutter_query_client.dart';
 import '../../shared.dart';
 import '../posts/post_controllers.dart';
 import '../posts/post_model.dart';
-import '../posts/post_service.dart';
 import '../products/product_controllers.dart';
 import '../products/product_model.dart';
 
@@ -30,61 +29,52 @@ class WidgetsShowcaseScreen extends StatelessWidget {
     // Both controllers are available to the entire screen tree.
     return MultiQueryProvider(
       providers: [
-        (child) => QueryProvider<PostsQueryController, List<Post>>(
-          create: (_) => PostsQueryController(),
-          child: child,
-        ),
-        (child) => QueryProvider<CreatePostMutation, Post>(
-          create: (_) => CreatePostMutation(),
-          child: child,
-        ),
+        QueryProvider(create: (_) => PostsQueryController()),
+        QueryProvider(create: (_) => CreatePostMutation()),
+        InfiniteQueryProvider(create: (_) => ProductsInfiniteController()),
       ],
-      // ── InfiniteQueryProvider for the infinite-query section ──────
-      child: InfiniteQueryProvider<ProductsInfiniteController>(
-        create: (_) => ProductsInfiniteController(),
-        // ── MultiQueryListener: attach two side-effect listeners ─────
-        // One for the query, one for the mutation — both run without
-        // adding any widget between them and their controllers.
-        child: MultiQueryListener(
-          listeners: [
-            QueryListener<PostsQueryController, List<Post>>(
-              listenWhen: (prev, next) => prev.isError != next.isError,
-              listener: (context, state) {
-                if (state.isError) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        '[MultiQueryListener] Posts error: ${state.error}',
-                      ),
-                      backgroundColor: Theme.of(context).colorScheme.error,
-                    ),
-                  );
-                }
-              },
-            ),
-            QueryListener<CreatePostMutation, Post>(
-              listenWhen: (_, next) => next.isSuccess || next.isError,
-              listener: (context, state) {
-                final msg =
-                    state.isSuccess
-                        ? '[MultiQueryListener] Mutation succeeded!'
-                        : '[MultiQueryListener] Mutation failed';
+      // ── MultiQueryListener: attach two side-effect listeners ─────
+      // One for the query, one for the mutation — both run without
+      // adding any widget between them and their controllers.
+      child: MultiQueryListener(
+        listeners: [
+          QueryListener<PostsQueryController, List<Post>>(
+            listenWhen: (prev, next) => prev.isError != next.isError,
+            listener: (context, state) {
+              if (state.isError) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(msg),
-                    backgroundColor:
-                        state.isSuccess
-                            ? Colors.green.shade700
-                            : Theme.of(context).colorScheme.error,
+                    content: Text(
+                      '[MultiQueryListener] Posts error: ${state.error}',
+                    ),
+                    backgroundColor: Theme.of(context).colorScheme.error,
                   ),
                 );
-              },
-            ),
-          ],
-          child: Scaffold(
-            appBar: AppBar(title: const Text('Widget Showcase')),
-            body: _ShowcaseBody(),
+              }
+            },
           ),
+          QueryListener<CreatePostMutation, Post>(
+            listenWhen: (_, next) => next.isSuccess || next.isError,
+            listener: (context, state) {
+              final msg =
+                  state.isSuccess
+                      ? '[MultiQueryListener] Mutation succeeded!'
+                      : '[MultiQueryListener] Mutation failed';
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(msg),
+                  backgroundColor:
+                      state.isSuccess
+                          ? Colors.green.shade700
+                          : Theme.of(context).colorScheme.error,
+                ),
+              );
+            },
+          ),
+        ],
+        child: Scaffold(
+          appBar: AppBar(title: const Text('Widget Showcase')),
+          body: _ShowcaseBody(),
         ),
       ),
     );
@@ -104,12 +94,24 @@ class _ShowcaseBody extends StatelessWidget {
         // ── Feature banner ──────────────────────────────────────────
         FeatureBanner(
           features: [
-            const FeatureItem(Icons.layers, 'MultiQueryProvider', Colors.indigo),
+            const FeatureItem(
+              Icons.layers,
+              'MultiQueryProvider',
+              Colors.indigo,
+            ),
             const FeatureItem(Icons.merge, 'QueryConsumer', Colors.teal),
             const FeatureItem(Icons.ads_click, 'QuerySelector', Colors.purple),
             const FeatureItem(Icons.hearing, 'QueryListener', Colors.blue),
-            const FeatureItem(Icons.all_inclusive, 'InfiniteQuery*', Colors.green),
-            const FeatureItem(Icons.queue_music, 'MultiQueryListener', Colors.orange),
+            const FeatureItem(
+              Icons.all_inclusive,
+              'InfiniteQuery*',
+              Colors.green,
+            ),
+            const FeatureItem(
+              Icons.queue_music,
+              'MultiQueryListener',
+              Colors.orange,
+            ),
             const FeatureItem(Icons.monitor_heart, 'QueryObserver', Colors.red),
           ],
         ),
@@ -129,17 +131,17 @@ class _ShowcaseBody extends StatelessWidget {
               const _CodeLabel('''
 MultiQueryProvider(
   providers: [
-    (child) => QueryProvider<PostsController, List<Post>>(
-      create: (_) => PostsController(), child: child,
+    QueryProvider(
+      create: (_) => PostsController(),
     ),
-    (child) => QueryProvider<CreatePostMutation, Post>(
-      create: (_) => CreatePostMutation(), child: child,
+    QueryProvider(
+      create: (_) => CreatePostMutation(),
+    ),
+    InfiniteQueryProvider(
+      create: (_) => ProductsController(),
     ),
   ],
-  child: InfiniteQueryProvider<ProductsController>(
-    create: (_) => ProductsController(),
-    child: MyScreen(),
-  ),
+  child: MyScreen(),
 )'''),
               const SizedBox(height: 10),
               // Show both controllers are live via their status badges
@@ -147,20 +149,22 @@ MultiQueryProvider(
                 children: [
                   QuerySelector<PostsQueryController, List<Post>, QueryStatus>(
                     selector: (s) => s.status,
-                    builder: (context, status) => _StatusBadge(
-                      label: 'PostsQueryController',
-                      status: status,
-                      color: Colors.indigo,
-                    ),
+                    builder:
+                        (context, status) => _StatusBadge(
+                          label: 'PostsQueryController',
+                          status: status,
+                          color: Colors.indigo,
+                        ),
                   ),
                   const SizedBox(width: 8),
                   QuerySelector<CreatePostMutation, Post, QueryStatus>(
                     selector: (s) => s.status,
-                    builder: (context, status) => _StatusBadge(
-                      label: 'CreatePostMutation',
-                      status: status,
-                      color: Colors.teal,
-                    ),
+                    builder:
+                        (context, status) => _StatusBadge(
+                          label: 'CreatePostMutation',
+                          status: status,
+                          color: Colors.teal,
+                        ),
                   ),
                 ],
               ),
@@ -192,8 +196,10 @@ MultiQueryProvider(
                 );
               }
             },
-            buildWhen: (prev, next) =>
-                prev.status != next.status || prev.data?.length != next.data?.length,
+            buildWhen:
+                (prev, next) =>
+                    prev.status != next.status ||
+                    prev.data?.length != next.data?.length,
             builder: (context, state) => _QueryStatusRow(state: state),
           ),
         ),
@@ -213,20 +219,20 @@ MultiQueryProvider(
               // Selects only the item count — ignores refetch/stale state changes.
               QuerySelector<PostsQueryController, List<Post>, int>(
                 selector: (state) => state.data?.length ?? 0,
-                builder: (context, count) => _CountBadge(
-                  label: 'Post count',
-                  count: count,
-                  color: Colors.indigo,
-                ),
+                builder:
+                    (context, count) => _CountBadge(
+                      label: 'Post count',
+                      count: count,
+                      color: Colors.indigo,
+                    ),
               ),
               const SizedBox(height: 8),
               // Selects only isStale — rebuilds only when staleness toggles.
               QuerySelector<PostsQueryController, List<Post>, bool>(
                 selector: (state) => state.isStale,
-                builder: (context, isStale) => _BoolBadge(
-                  label: 'isStale',
-                  value: isStale,
-                ),
+                builder:
+                    (context, isStale) =>
+                        _BoolBadge(label: 'isStale', value: isStale),
               ),
             ],
           ),
@@ -242,8 +248,9 @@ MultiQueryProvider(
         _DemoCard(
           widgetName: 'QueryListener<PostsQueryController, List<Post>>',
           child: QueryListener<PostsQueryController, List<Post>>(
-            listenWhen: (prev, next) =>
-                prev.fetchStatus != next.fetchStatus && next.isRefetching,
+            listenWhen:
+                (prev, next) =>
+                    prev.fetchStatus != next.fetchStatus && next.isRefetching,
             listener: (context, state) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -253,25 +260,26 @@ MultiQueryProvider(
               );
             },
             child: QueryBuilder<PostsQueryController, List<Post>>(
-              buildWhen: (prev, next) =>
-                  prev.fetchStatus != next.fetchStatus ||
-                  prev.data?.length != next.data?.length,
-              builder: (context, state) => Column(
-                children: [
-                  _QueryStatusRow(state: state),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Tap refresh on Posts tab to trigger a refetch snackbar.',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color:
-                          Theme.of(
+              buildWhen:
+                  (prev, next) =>
+                      prev.fetchStatus != next.fetchStatus ||
+                      prev.data?.length != next.data?.length,
+              builder:
+                  (context, state) => Column(
+                    children: [
+                      _QueryStatusRow(state: state),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Tap refresh on Posts tab to trigger a refetch snackbar.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(
                             context,
                           ).colorScheme.onSurface.withValues(alpha: 0.5),
-                    ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
             ),
           ),
         ),
@@ -299,25 +307,25 @@ MultiQueryProvider(
                   ),
                   const SizedBox(height: 10),
                   FilledButton.icon(
-                    onPressed: state.isLoading
-                        ? null
-                        : () => mutation.mutate(
-                              () => postService.createPost(
-                                userId: 1,
-                                title: 'Test post from Showcase',
-                                body: 'Created via QueryBuilder demo',
+                    onPressed:
+                        state.isLoading
+                            ? null
+                            : () => mutation.mutate((
+                              userId: 1,
+                              title: 'Test post from Showcase',
+                              body: 'Created via QueryBuilder demo',
+                            )),
+                    icon:
+                        state.isLoading
+                            ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
                               ),
-                            ),
-                    icon: state.isLoading
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.send, size: 16),
+                            )
+                            : const Icon(Icons.send, size: 16),
                     label: Text(
                       state.isLoading ? 'Creating…' : 'Create test post',
                     ),
@@ -352,9 +360,10 @@ MultiQueryProvider(
                         ? '[QueryListener] Mutation succeeded — id: ${state.data?.id}'
                         : '[QueryListener] Mutation failed: ${state.error}',
                   ),
-                  backgroundColor: state.isSuccess
-                      ? Colors.green.shade700
-                      : Theme.of(context).colorScheme.error,
+                  backgroundColor:
+                      state.isSuccess
+                          ? Colors.green.shade700
+                          : Theme.of(context).colorScheme.error,
                   duration: const Duration(seconds: 3),
                 ),
               );
@@ -408,20 +417,23 @@ MultiQueryProvider(
               const SizedBox(height: 8),
               QuerySelector<CreatePostMutation, Post, bool>(
                 selector: (s) => s.isLoading,
-                builder: (context, isLoading) =>
-                    _BoolBadge(label: 'isLoading', value: isLoading),
+                builder:
+                    (context, isLoading) =>
+                        _BoolBadge(label: 'isLoading', value: isLoading),
               ),
               const SizedBox(height: 4),
               QuerySelector<CreatePostMutation, Post, bool>(
                 selector: (s) => s.isSuccess,
-                builder: (context, isSuccess) =>
-                    _BoolBadge(label: 'isSuccess', value: isSuccess),
+                builder:
+                    (context, isSuccess) =>
+                        _BoolBadge(label: 'isSuccess', value: isSuccess),
               ),
               const SizedBox(height: 4),
               QuerySelector<CreatePostMutation, Post, bool>(
                 selector: (s) => s.isError,
-                builder: (context, isError) =>
-                    _BoolBadge(label: 'isError', value: isError),
+                builder:
+                    (context, isError) =>
+                        _BoolBadge(label: 'isError', value: isError),
               ),
             ],
           ),
@@ -435,10 +447,11 @@ MultiQueryProvider(
               'Equivalent to QueryListener<C, List<T>> but cleaner.',
         ),
         _DemoCard(
-          widgetName: 'InfiniteQueryListener<ProductsInfiniteController, Product>',
+          widgetName:
+              'InfiniteQueryListener<ProductsInfiniteController, Product>',
           child: InfiniteQueryListener<ProductsInfiniteController, Product>(
-            listenWhen: (prev, next) =>
-                prev.isLoadingMore && !next.isLoadingMore,
+            listenWhen:
+                (prev, next) => prev.isLoadingMore && !next.isLoadingMore,
             listener: (context, state) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -447,17 +460,19 @@ MultiQueryProvider(
                         ? '[InfiniteQueryListener] Load-more failed'
                         : '[InfiniteQueryListener] Page loaded — ${state.data?.length ?? 0} total items',
                   ),
-                  backgroundColor: state.isError
-                      ? Theme.of(context).colorScheme.error
-                      : Colors.green.shade700,
+                  backgroundColor:
+                      state.isError
+                          ? Theme.of(context).colorScheme.error
+                          : Colors.green.shade700,
                   duration: const Duration(seconds: 2),
                 ),
               );
             },
             child: InfiniteQueryBuilder<ProductsInfiniteController, Product>(
-              buildWhen: (prev, next) =>
-                  prev.isLoadingMore != next.isLoadingMore ||
-                  prev.data?.length != next.data?.length,
+              buildWhen:
+                  (prev, next) =>
+                      prev.isLoadingMore != next.isLoadingMore ||
+                      prev.data?.length != next.data?.length,
               builder: (context, state) {
                 final ctrl = context.query<ProductsInfiniteController>();
                 return _InfiniteStatusRow(state: state, ctrl: ctrl);
@@ -469,35 +484,42 @@ MultiQueryProvider(
         // ── 10. InfiniteQuerySelector ───────────────────────────────
         _SectionHeader(
           label: 'InfiniteQuerySelector',
-          description: 'Select a slice of infinite query state — only the '
+          description:
+              'Select a slice of infinite query state — only the '
               'selecting widget rebuilds, not the whole tree.',
         ),
         _DemoCard(
-          widgetName: 'InfiniteQuerySelector<ProductsInfiniteController, Product, int>',
+          widgetName:
+              'InfiniteQuerySelector<ProductsInfiniteController, Product, int>',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Only rebuilds when item count changes (not on refetch/stale/etc.)
               InfiniteQuerySelector<ProductsInfiniteController, Product, int>(
                 selector: (state) => state.data?.length ?? 0,
-                builder: (context, count) => _CountBadge(
-                  label: 'Products loaded',
-                  count: count,
-                  color: Colors.purple,
-                ),
+                builder:
+                    (context, count) => _CountBadge(
+                      label: 'Products loaded',
+                      count: count,
+                      color: Colors.purple,
+                    ),
               ),
               const SizedBox(height: 6),
               // Only rebuilds when isLoadingMore toggles.
               InfiniteQuerySelector<ProductsInfiniteController, Product, bool>(
                 selector: (state) => state.isLoadingMore,
-                builder: (context, isLoadingMore) =>
-                    _BoolBadge(label: 'isLoadingMore', value: isLoadingMore),
+                builder:
+                    (context, isLoadingMore) => _BoolBadge(
+                      label: 'isLoadingMore',
+                      value: isLoadingMore,
+                    ),
               ),
               const SizedBox(height: 6),
               InfiniteQuerySelector<ProductsInfiniteController, Product, bool>(
                 selector: (state) => state.hasData,
-                builder: (context, hasData) =>
-                    _BoolBadge(label: 'hasData', value: hasData),
+                builder:
+                    (context, hasData) =>
+                        _BoolBadge(label: 'hasData', value: hasData),
               ),
             ],
           ),
@@ -511,10 +533,10 @@ MultiQueryProvider(
               'The List<T> wrapper is baked in — specify only the item type.',
         ),
         _DemoCard(
-          widgetName: 'InfiniteQueryConsumer<ProductsInfiniteController, Product>',
+          widgetName:
+              'InfiniteQueryConsumer<ProductsInfiniteController, Product>',
           child: InfiniteQueryConsumer<ProductsInfiniteController, Product>(
-            listenWhen: (prev, next) =>
-                !prev.isSuccess && next.isSuccess,
+            listenWhen: (prev, next) => !prev.isSuccess && next.isSuccess,
             listener: (context, state) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -527,10 +549,11 @@ MultiQueryProvider(
                 ),
               );
             },
-            buildWhen: (prev, next) =>
-                prev.status != next.status ||
-                prev.data?.length != next.data?.length ||
-                prev.isLoadingMore != next.isLoadingMore,
+            buildWhen:
+                (prev, next) =>
+                    prev.status != next.status ||
+                    prev.data?.length != next.data?.length ||
+                    prev.isLoadingMore != next.isLoadingMore,
             builder: (context, state) {
               final ctrl = context.query<ProductsInfiniteController>();
               return _InfiniteStatusRow(state: state, ctrl: ctrl);
@@ -754,8 +777,7 @@ class _QueryStatusRow extends StatelessWidget {
       label = 'Refetching…';
       color = Colors.blue;
     } else if (state.isSuccess) {
-      final count =
-          state.data is List ? (state.data as List).length : null;
+      final count = state.data is List ? (state.data as List).length : null;
       label = count != null ? 'Success — $count items' : 'Success';
       color = Colors.green;
     } else if (state.isError) {
@@ -876,10 +898,7 @@ class _StatusBadge extends StatelessWidget {
         children: [
           Text(
             label,
-            style: TextStyle(
-              fontSize: 9,
-              color: color.withValues(alpha: 0.7),
-            ),
+            style: TextStyle(fontSize: 9, color: color.withValues(alpha: 0.7)),
           ),
           const SizedBox(height: 2),
           Text(
@@ -931,10 +950,7 @@ class _CountBadge extends StatelessWidget {
         const SizedBox(width: 8),
         Text(
           label,
-          style: TextStyle(
-            fontSize: 12,
-            color: color.withValues(alpha: 0.8),
-          ),
+          style: TextStyle(fontSize: 12, color: color.withValues(alpha: 0.8)),
         ),
       ],
     );
@@ -961,11 +977,7 @@ class _BoolBadge extends StatelessWidget {
         const SizedBox(width: 6),
         Text(
           label,
-          style: TextStyle(
-            fontFamily: 'monospace',
-            fontSize: 12,
-            color: color,
-          ),
+          style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: color),
         ),
       ],
     );

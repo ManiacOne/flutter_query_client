@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -222,13 +223,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
     final ror = _resolvedRefetchOnReconnect;
     if (ror == RefetchOnReconnect.never) return;
 
-    final dataIsStale = state.isStale ||
-        (state.hasData &&
-            _resolvedStaleTime != null &&
-            client
-                    .get<List<List<T>>>(cacheKey, _serializeFilters(_filters))
-                    ?.isStale ==
-                true);
+    final dataIsStale = state.isStale;
 
     if (ror == RefetchOnReconnect.ifStale && !dataIsStale && state.hasData) {
       if (state.isPaused) {
@@ -250,6 +245,14 @@ abstract class InfiniteQueryController<T, PageParam, P>
   List<T> get _flatData => _flatCache ??= _pages.expand((p) => p).toList();
 
   void _invalidateFlat() => _flatCache = null;
+
+  int _flatIndexOf(int pageIndex, int itemIndex) {
+    var offset = 0;
+    for (var i = 0; i < pageIndex; i++) {
+      offset += _pages[i].length;
+    }
+    return offset + itemIndex;
+  }
 
   // ─── Filters ─────────────────────────────────────────────────────
 
@@ -330,7 +333,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
       cacheKey,
       _serializeFilters(_filters),
       CachedQueryData<List<List<T>>>(
-        data: _pages.map((p) => List<T>.from(p)).toList(),
+        data: _pages.map((p) => UnmodifiableListView<T>(p)).toList(),
         fetchTime: DateTime.now(),
         staleTime: _resolvedStaleTime,
         gcTime: _resolvedGcTime,
@@ -345,7 +348,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _pages.clear();
       _pageParams.clear();
       for (var i = 0; i < cached.data.length; i++) {
-        _pages.add(List<T>.from(cached.data[i]));
+        _pages.add(List<T>.of(cached.data[i]));
         if (i == 0) {
           _pageParams.add(initialPageParam);
         } else {
@@ -477,13 +480,13 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
     if (cached == null) return;
 
-    final cachedFlat = cached.data.expand((p) => p).toList();
-    if (_flatData.length != cachedFlat.length ||
+    final cachedTotalLength = cached.data.fold<int>(0, (sum, p) => sum + p.length);
+    if (_flatData.length != cachedTotalLength ||
         !identical(_flatData, state.data)) {
       _pages.clear();
       _pageParams.clear();
       for (var i = 0; i < cached.data.length; i++) {
-        _pages.add(List<T>.from(cached.data[i]));
+        _pages.add(List<T>.of(cached.data[i]));
         if (i == 0) {
           _pageParams.add(initialPageParam);
         } else {
@@ -638,7 +641,10 @@ abstract class InfiniteQueryController<T, PageParam, P>
       final idx = _pages[i].indexWhere(predicate);
       if (idx != -1) {
         _pages[i][idx] = updatedItem;
-        _invalidateFlat();
+        if (_flatCache != null) {
+          final flatIdx = _flatIndexOf(i, idx);
+          if (flatIdx != -1) _flatCache![flatIdx] = updatedItem;
+        }
         _safeEmit(QueryState<List<T>>(
           status: QueryStatus.success,
           data: _flatData,
@@ -666,7 +672,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
     } else {
       _pages.first.insert(0, item);
     }
-    _invalidateFlat();
+    _flatCache?.insert(0, item);
     _safeEmit(QueryState<List<T>>(
       status: QueryStatus.success,
       data: _flatData,
@@ -680,7 +686,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
     } else {
       _pages.last.add(item);
     }
-    _invalidateFlat();
+    _flatCache?.add(item);
     _safeEmit(QueryState<List<T>>(
       status: QueryStatus.success,
       data: _flatData,

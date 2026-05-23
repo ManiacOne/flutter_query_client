@@ -52,32 +52,55 @@ class PostCommentsController extends QueryController<List<Comment>, int> {
       postService.getPostComments(postId!);
 }
 
+// ── Mutation param types ──────────────────────────────────────────
+
+typedef CreatePostParams = ({int userId, String title, String body});
+
+typedef UpdatePostParams = ({int id, String? title, String? body});
+
 // ── Mutation controllers ───────────────────────────────────────────
 
 /// Demonstrates mutation lifecycle hooks: onSuccess, onMutationError, onSettled.
 /// Override these to run side effects after the mutation completes without
 /// coupling that logic to the UI layer.
-class CreatePostMutation extends MutationController<Post> {
+class CreatePostMutation
+    extends MutationController<Post, CreatePostParams> {
+  @override
+  Future<Post> mutationFn(CreatePostParams params) {
+    return postService.createPost(
+      userId: params.userId,
+      title: params.title,
+      body: params.body,
+    );
+  }
+
   @override
   void onSuccess(Post data) {
-    // Called after a successful mutation — ideal for analytics, logging, etc.
     QueryLogger.info('[CreatePost] Created post id=${data.id}');
   }
 
   @override
   void onMutationError(Object error) {
-    // Called after a failed mutation — log, report to Sentry, etc.
     QueryLogger.warning('[CreatePost] Failed: $error');
   }
 
   @override
   void onSettled(Post? data, Object? error) {
-    // Always called regardless of outcome — use for cleanup or audit trails.
     QueryLogger.fine('[CreatePost] Settled (success: ${data != null})');
   }
 }
 
-class UpdatePostMutation extends MutationController<Post> {
+class UpdatePostMutation
+    extends MutationController<Post, UpdatePostParams> {
+  @override
+  Future<Post> mutationFn(UpdatePostParams params) {
+    return postService.updatePost(
+      params.id,
+      title: params.title,
+      body: params.body,
+    );
+  }
+
   @override
   void onSuccess(Post data) {
     QueryLogger.info('[UpdatePost] Updated post id=${data.id}');
@@ -90,7 +113,13 @@ class UpdatePostMutation extends MutationController<Post> {
 }
 
 /// Returns true on success (JSONPlaceholder delete returns empty body).
-class DeletePostMutation extends MutationController<bool> {
+class DeletePostMutation extends MutationController<bool, int> {
+  @override
+  Future<bool> mutationFn(int params) async {
+    await postService.deletePost(params);
+    return true;
+  }
+
   @override
   void onSuccess(bool data) {
     QueryLogger.info('[DeletePost] Post deleted');

@@ -6,6 +6,8 @@ import 'package:flutter_query_client/src/providers/query_client_provider.dart';
 
 extension QueryContextExtension on BuildContext {
   T query<T extends Cubit<Object>>() => BlocProvider.of<T>(this);
+  T queryWatch<T extends Cubit<Object>>() =>
+      BlocProvider.of<T>(this, listen: true);
   QueryClient get queryClient => QueryClientProvider.of(this);
   CachedQueryData<T>? cachedQuery<T>(String key) {
     return queryClient.get<T>(key);

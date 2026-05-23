@@ -135,7 +135,14 @@ class MockedQueryController extends QueryController<String, void> {
   }
 }
 
-class SimpleMutation extends MutationController<String> {}
+class SimpleMutation extends MutationController<String, void> {
+  final Future<String> Function()? _fn;
+  SimpleMutation({Future<String> Function()? fn}) : _fn = fn;
+
+  @override
+  Future<String> mutationFn(void params) =>
+      _fn?.call() ?? Future.value('done');
+}
 
 // ═══════════════════════════════════════════════════════════════════
 
@@ -226,7 +233,7 @@ void main() {
       final mutation = SimpleMutation();
       mutation.stream.listen(states.add);
 
-      await mutation.mutate(() async => 'done');
+      await mutation.mutate();
       await mutation.close();
 
       expect(states.length, 2);
@@ -298,9 +305,9 @@ void main() {
 
     test('MutationController: no crash when closed during mutate', () async {
       final completer = Completer<String>();
-      final mutation = SimpleMutation();
+      final mutation = SimpleMutation(fn: () => completer.future);
 
-      unawaited(mutation.mutate(() => completer.future));
+      unawaited(mutation.mutate());
       await Future.delayed(Duration.zero);
       await mutation.close();
 
@@ -429,13 +436,13 @@ void main() {
     });
 
     test('mutation transformError works', () async {
-      final mutation = SimpleMutation();
+      final mutation = SimpleMutation(fn: () async => throw Exception('mut fail'));
 
       QueryClient.instance.setDefaults(QueryDefaults(
         transformError: (e) => 'mut-transformed: $e',
       ));
 
-      await mutation.mutate(() async => throw Exception('mut fail'));
+      await mutation.mutate();
 
       expect(mutation.state.isError, isTrue);
       expect((mutation.state.error as String), contains('mut-transformed'));

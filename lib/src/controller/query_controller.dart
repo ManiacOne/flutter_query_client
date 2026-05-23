@@ -202,11 +202,7 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
     final ror = _resolvedRefetchOnReconnect;
     if (ror == RefetchOnReconnect.never) return;
 
-    final dataIsStale =
-        state.isStale ||
-        (state.hasData &&
-            _resolvedStaleTime != null &&
-            client.get<T>(cacheKey, _serializedParams)?.isStale == true);
+    final dataIsStale = state.isStale;
 
     if (ror == RefetchOnReconnect.ifStale && !dataIsStale && state.hasData) {
       // Data is fresh — just clear paused status if set.

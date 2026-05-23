@@ -99,11 +99,17 @@ class QueryClient {
 
   void _onConnectivityChange(bool isOnline) {
     if (!isOnline) return;
-    // Device came online — notify all registered reconnect callbacks.
-    for (final callbacks in _reconnectCallbacks.values) {
-      for (final cb in callbacks.toList()) {
-        cb(isStale: false); // Controllers determine staleness themselves.
+    for (final entry in _reconnectCallbacks.entries.toList()) {
+      final stale = <ReconnectCallback>[];
+      for (final cb in entry.value.toList()) {
+        try {
+          cb(isStale: false);
+        } catch (_) {
+          stale.add(cb);
+        }
       }
+      entry.value.removeAll(stale);
+      if (entry.value.isEmpty) _reconnectCallbacks.remove(entry.key);
     }
   }
 
@@ -197,9 +203,16 @@ class QueryClient {
     final key = _serialize(baseKey, params);
     final callbacks = _invalidateCallbacks[key];
     if (callbacks == null) return;
+    final stale = <VoidCallback>[];
     for (final cb in callbacks.toList()) {
-      cb();
+      try {
+        cb();
+      } catch (_) {
+        stale.add(cb);
+      }
     }
+    callbacks.removeAll(stale);
+    if (callbacks.isEmpty) _invalidateCallbacks.remove(key);
   }
 
   // ─── Update ──────────────────────────────────────────────────────
@@ -374,6 +387,21 @@ class QueryClient {
     _networkObserver?.dispose();
     _networkObserver = null;
   }
+
+  // ─── Diagnostics ─────────────────────────────────────────────────
+
+  int get activeStaleTimerCount => _staleTimers.length;
+
+  int get activeGcTimerCount => _gcTimers.length;
+
+  int get activeInvalidateCallbackCount =>
+      _invalidateCallbacks.values.fold(0, (sum, set) => sum + set.length);
+
+  int get activeReconnectCallbackCount =>
+      _reconnectCallbacks.values.fold(0, (sum, set) => sum + set.length);
+
+  int get cacheEntryCount =>
+      _cache.values.fold(0, (sum, map) => sum + map.length);
 
   // ─── Internal ────────────────────────────────────────────────────
 

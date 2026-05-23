@@ -5,16 +5,17 @@ import 'package:flutter_query_client/flutter_query_client.dart';
 import '../../shared.dart';
 import 'product_controllers.dart';
 import 'product_model.dart';
-import 'product_service.dart';
+
 import 'product_detail_screen.dart';
 import 'product_form_screen.dart';
 
 // Features demonstrated on this screen:
-//  • InfiniteQueryController — cursor/page-based pagination
-//  • setParams()             — live search triggers new page sequence
-//  • loadMore()              — triggered on scroll near bottom
-//  • removeItem()            — optimistic item removal from all pages
-//  • refetchOnMount: never   — manual load, no auto-fetch on navigate back
+//  • InfiniteQueryController        — cursor/page-based pagination
+//  • setParams()                    — live search triggers new page sequence
+//  • loadMore()                     — triggered on scroll near bottom
+//  • removeItem()                   — optimistic item removal from all pages
+//  • refetchOnMount: never          — manual load, no auto-fetch on navigate back
+//  • updateInfiniteQuery() + prependItem() — cache-write + live controller sync after create
 
 class ProductsPaginatedScreen extends StatelessWidget {
   const ProductsPaginatedScreen({super.key});
@@ -117,9 +118,7 @@ class _ProductsViewState extends State<_ProductsView> {
     );
     if (confirmed != true || !mounted) return;
 
-    await _deleteMutation.mutate(
-      () => productService.deleteProduct(product.id),
-    );
+    await _deleteMutation.mutate(product.id);
 
     if (!mounted) return;
     if (_deleteMutation.state.error != null) {
@@ -154,28 +153,64 @@ class _ProductsViewState extends State<_ProductsView> {
   }
 
   Future<void> _openCreate() async {
-    final created = await Navigator.push<Product>(
+    await Navigator.push<Product>(
       context,
       MaterialPageRoute(builder: (_) => const ProductFormScreen()),
     );
-    if (created != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(
-                Icons.add_circle_outline,
-                color: Colors.white,
-                size: 16,
-              ),
-              const SizedBox(width: 8),
-              Text('Created: ${created.title} (id: ${created.id})'),
-            ],
-          ),
-          backgroundColor: Colors.green.shade700,
-        ),
-      );
-    }
+    // if (created == null || !mounted) return;
+
+    // // ── updateInfiniteQuery ──────────────────────────────────────────
+    // // Writes the new product directly into the two-level cache keyed by
+    // // 'products'. The updater receives ALL pages as List<List<Product>>
+    // // and must return a new List<List<Product>>.
+    // //
+    // // Use this when you need to sync the cache from OUTSIDE the widget
+    // // tree — e.g., from a background service, push notification handler,
+    // // or after a mutation on a different screen.
+    // //
+    // // ⚠ updateInfiniteQuery does NOT notify the active
+    // //   ProductsInfiniteController. The live UI must be updated separately
+    // //   via the controller's own helpers (prependItem / appendItem /
+    // //   updateItem / removeItem), OR by calling invalidateQueries() to
+    // //   trigger a refetch.
+    // QueryClient.instance.updateInfiniteQuery<Product>(
+    //   'products',
+    //   (pages) {
+    //     // Guard: if no pages cached yet, seed page-0 with just this item.
+    //     if (pages.isEmpty) return [[created]];
+    //     // Prepend to page-0, leave subsequent pages untouched.
+    //     return [[created, ...pages[0]], ...pages.sublist(1)];
+    //   },
+    // );
+
+    // // ── prependItem ──────────────────────────────────────────────────
+    // // Keeps the LIVE controller in sync immediately — no refetch needed.
+    // // prependItem inserts at index 0 of _flatCache in O(1) and emits a
+    // // new state, so the list scrolls to show the new item instantly.
+    // //
+    // // Together with updateInfiniteQuery above:
+    // //  • Cache is up-to-date for any future controller that mounts with
+    // //    refetchOnMount: never (it will restore from cache without a network call).
+    // //  • The current active controller reflects the change right away.
+    // context.query<ProductsInfiniteController>().prependItem(created);
+
+    // ScaffoldMessenger.of(context).showSnackBar(
+    //   SnackBar(
+    //     content: Row(
+    //       children: [
+    //         const Icon(Icons.add_circle_outline, color: Colors.white, size: 16),
+    //         const SizedBox(width: 8),
+    //         Expanded(
+    //           child: Text(
+    //             '"${created.title}" created — prepended via '
+    //             'updateInfiniteQuery + prependItem()',
+    //           ),
+    //         ),
+    //       ],
+    //     ),
+    //     backgroundColor: Colors.green.shade700,
+    //   ),
+    // );
   }
 
   @override
@@ -253,6 +288,11 @@ class _ProductsViewState extends State<_ProductsView> {
                 Icons.layers_outlined,
                 'keepPreviousData',
                 Colors.cyan,
+              ),
+              FeatureItem(
+                Icons.system_update_alt_outlined,
+                'updateInfiniteQuery',
+                Colors.teal,
               ),
             ],
           ),

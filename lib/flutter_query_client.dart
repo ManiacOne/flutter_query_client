@@ -13,6 +13,7 @@ export 'src/controller/mutation_controller.dart';
 export 'src/controller/infinite_query_controller.dart';
 export 'src/client/query_client.dart';
 export 'src/providers/query_client_provider.dart';
+export 'src/providers/query_provider_widget.dart';
 export 'src/providers/query_provider.dart';
 export 'src/providers/infinite_query_provider.dart';
 export 'src/providers/multi_query_provider.dart';

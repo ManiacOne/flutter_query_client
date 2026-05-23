@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'features/inefficiency_demos/inefficiency_demos_screen.dart';
 import 'features/posts/posts_list_screen.dart';
 import 'features/products/products_paginated_screen.dart';
 import 'features/showcase/widgets_showcase_screen.dart';
@@ -36,12 +37,18 @@ class _HomeScreenState extends State<HomeScreen> {
       selectedIcon: Icon(Icons.widgets),
       label: 'Widgets',
     ),
+    NavigationDestination(
+      icon: Icon(Icons.bug_report_outlined),
+      selectedIcon: Icon(Icons.bug_report),
+      label: 'Issues',
+    ),
   ];
 
   static const _screens = [
     PostsListScreen(),
     ProductsPaginatedScreen(),
     WidgetsShowcaseScreen(),
+    InefficiencyDemosScreen(),
   ];
 
   @override

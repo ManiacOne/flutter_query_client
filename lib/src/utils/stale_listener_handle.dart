@@ -20,7 +20,11 @@ class StaleListenerHandle {
 
   /// Register a stale listener for the given [params].
   /// Automatically unregisters any previous listener.
+  bool get isRegistered => _staleCallback != null;
+  String? get registeredParams => _listenedParams;
+
   void register(String? params, VoidCallback onStale) {
+    if (_staleCallback != null && _listenedParams == params) return;
     unregister();
     _staleCallback = onStale;
     _listenedParams = params;

@@ -75,11 +75,49 @@ class ProductByIdController extends QueryController<Product, int> {
   Future<Product> queryFn(int? id) => productService.getProductById(id!);
 }
 
+// ── Mutation param types ──────────────────────────────────────────
+
+typedef CreateProductParams = ({
+  String title,
+  String description,
+  double price,
+  String category,
+  int stock,
+});
+
+typedef UpdateProductParams = ({
+  int id,
+  Map<String, dynamic> fields,
+});
+
 // ── Mutation controllers ───────────────────────────────────────────
 
-class CreateProductMutation extends MutationController<Product> {}
+class CreateProductMutation
+    extends MutationController<Product, CreateProductParams> {
+  @override
+  Future<Product> mutationFn(CreateProductParams params) {
+    return productService.createProduct(
+      title: params.title,
+      description: params.description,
+      price: params.price,
+      category: params.category,
+      stock: params.stock,
+    );
+  }
+}
 
-class UpdateProductMutation extends MutationController<Product> {}
+class UpdateProductMutation
+    extends MutationController<Product, UpdateProductParams> {
+  @override
+  Future<Product> mutationFn(UpdateProductParams params) {
+    return productService.updateProduct(params.id, params.fields);
+  }
+}
 
 /// DummyJSON returns the deleted product object on DELETE.
-class DeleteProductMutation extends MutationController<Product> {}
+class DeleteProductMutation extends MutationController<Product, int> {
+  @override
+  Future<Product> mutationFn(int params) {
+    return productService.deleteProduct(params);
+  }
+}
