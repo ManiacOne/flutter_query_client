@@ -333,30 +333,31 @@ void main() {
   });
 
   // ═══════════════════════════════════════════════════════════════════
-  // QueryException (typed package errors)
+  // Retry exhaustion preserves original error
   // ═══════════════════════════════════════════════════════════════════
 
-  group('QueryException (retry exhaustion)', () {
-    test('wraps error as QueryException after retries exhausted', () async {
+  group('Retry exhaustion preserves original error', () {
+    test('original error surfaces after retries exhausted', () async {
       final controller = RetryQueryController(retryCount: 2);
       await Future.delayed(const Duration(milliseconds: 500));
 
       expect(controller.state.isError, isTrue);
-      final error = controller.state.errorAs<QueryException>();
+      final error = controller.state.errorAs<Exception>();
       expect(error, isNotNull);
-      expect(error!.message, contains('attempt'));
-      expect(error.originalError, isA<Exception>());
+      expect(error.toString(), contains('always fails'));
 
       await controller.close();
     });
 
-    test('single attempt (retryCount=1) still wraps as QueryException',
+    test('single attempt (retryCount=1) still surfaces original error',
         () async {
       final controller = RetryQueryController(retryCount: 1);
       await Future.delayed(const Duration(milliseconds: 200));
 
       expect(controller.state.isError, isTrue);
-      expect(controller.state.errorAs<QueryException>(), isNotNull);
+      final error = controller.state.errorAs<Exception>();
+      expect(error, isNotNull);
+      expect(error.toString(), contains('always fails'));
 
       await controller.close();
     });
