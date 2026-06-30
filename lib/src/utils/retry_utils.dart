@@ -37,7 +37,7 @@ Future<T> retryWithBackoff<T>({
       lastStackTrace = st;
       attempts++;
       if (attempts >= maxAttempts) {
-        Error.throwWithStackTrace(lastError!, lastStackTrace!);
+        Error.throwWithStackTrace(lastError, lastStackTrace);
       }
       final delayMs = baseDelay.inMilliseconds * (1 << (attempts - 1));
       final cappedMs = delayMs > 30000 ? 30000 : delayMs;
