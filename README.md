@@ -26,7 +26,7 @@ Handles **fetching, caching, synchronizing, and updating** server state with min
 
 ```yaml
 dependencies:
-  flutter_query_client: ^2.0.0
+  flutter_query_client: ^2.0.1
 ```
 
 ---
@@ -721,6 +721,61 @@ All `QueryDefaults` values apply globally but are overridable on each controller
 
 ---
 
+## Error Handling
+
+Errors thrown by your `queryFn` or `mutationFn` flow through unchanged — even after retry exhaustion. `transformError`, lifecycle hooks (`onQueryError`, `onMutationError`), and `state.error` all receive the original error, not a framework wrapper.
+
+```dart
+// Your API client throws a typed error:
+class ApiException implements Exception {
+  final int statusCode;
+  final String message;
+  ApiException(this.statusCode, this.message);
+}
+
+// transformError receives the original ApiException — not a QueryException.
+QueryClientProvider(
+  defaults: QueryDefaults(
+    retryCount: 3,
+    transformError: (error) {
+      if (error is ApiException) {
+        return 'Server error ${error.statusCode}: ${error.message}';
+      }
+      return error;
+    },
+  ),
+  child: const MyApp(),
+)
+```
+
+In the UI, `state.error` contains whatever `transformError` returns (or the raw error if no transform is set):
+
+```dart
+QueryBuilder<PostsController, List<Post>>(
+  builder: (context, state) {
+    if (state.isError) return Text('${state.error}');
+    // ...
+  },
+)
+```
+
+Per-controller `transformError` overrides the global one:
+
+```dart
+class PostsController extends QueryController<List<Post>, void> {
+  PostsController()
+      : super('posts', transformError: (error) {
+          if (error is ApiException && error.statusCode == 404) {
+            return 'Posts not found';
+          }
+          return error;
+        });
+  // ...
+}
+```
+
+---
+
 ## Network Modes
 
 | Mode | Behaviour |
@@ -750,5 +805,5 @@ A full example app demonstrating all features is in the [`example/`](example/) d
 
 - **Posts tab** — `QueryController`, `QueryBuilder`, `MutationController<T, P>` typed params, `QueryClient.instance.update` cache patching from mutation listeners, background polling, offline support
 - **Products tab** — `InfiniteQueryController`, `setParams()` live search, `loadMore()` on scroll, `keepPreviousData`, `updateInfiniteQuery` + `prependItem` after create, optimistic item removal
-- **Widgets tab** — live showcase of every widget: `MultiQueryProvider`, `QueryConsumer`, `QuerySelector`, `InfiniteQueryListener`, `InfiniteQueryConsumer`, `InfiniteQuerySelector`, `MultiQueryListener`, `QueryObserver`, and using mutation controllers with all Query\* widgets
+- **Widgets tab** — live showcase of every widget: `MultiQueryProvider`, `QueryConsumer`, `QuerySelector`, `InfiniteQueryListener`, `InfiniteQueryConsumer`, `InfiniteQuerySelector`, `MultiQueryListener`, `QueryObserver`, error handling with `transformError`, and using mutation controllers with all Query\* widgets
 - **Issues tab** — interactive before/after benchmarks for all v2.0.0 performance and memory optimizations; detailed documentation in [`example/lib/features/inefficiency_demos/OPTIMIZATIONS.md`](example/lib/features/inefficiency_demos/OPTIMIZATIONS.md)

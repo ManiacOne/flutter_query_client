@@ -1,3 +1,16 @@
+## 2.0.1
+
+### Fixes
+
+* **Fixed: original error lost after retry exhaustion** — `retryWithBackoff` was wrapping the user's error in a `QueryException('Operation failed after N attempt(s)')`, burying the original API/service error. `transformError`, `onMutationError`, `onQueryError`, and `state.error` all received the `QueryException` wrapper instead of the actual error thrown by `queryFn` or `mutationFn`. Now the original error is rethrown with its original stack trace after retries are exhausted, so it flows through the entire error pipeline unchanged. The `QueryException` abort case (network offline) is unaffected.
+
+### Example
+
+* Updated global `transformError` in `main.dart` to demonstrate the corrected pattern — checking for the app's `ApiException` type instead of `QueryException`
+* Added **Error Handling** demo section to the Widgets showcase screen with a deliberately failing mutation that shows `state.error` value and type, proving the original error flows through `transformError` intact
+
+---
+
 ## 2.0.0
 
 ### Breaking changes
