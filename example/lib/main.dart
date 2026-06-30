@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
 import 'package:query_client_example/app_observer.dart';
+import 'core/api_client.dart';
 import 'home_screen.dart';
 
 void main() {
@@ -30,10 +31,11 @@ class App extends StatelessWidget {
           ),
         ],
         transformError: (error) {
+          // The original error thrown by your API/service flows through
+          // directly — even after retry exhaustion. Use transformError to
+          // normalize it into a user-friendly message.
           if (error is QueryException) {
-            return Exception(
-              'Query failed with status code ${error.toString()}: ${error.message}',
-            );
+            return 'Query error: ${error.message}';
           }
           return error;
         },

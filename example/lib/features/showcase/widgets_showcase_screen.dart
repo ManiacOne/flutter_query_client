@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
+import '../../core/api_client.dart';
 import '../../shared.dart';
 import '../posts/post_controllers.dart';
 import '../posts/post_model.dart';
@@ -19,6 +20,7 @@ import '../products/product_model.dart';
 //  • InfiniteQueryConsumer   — builder + listener for infinite queries
 //  • MultiQueryListener      — multiple listeners in one widget
 //  • QueryObserver           — extends BlocObserver, zero extra dep in app
+//  • Error handling          — original errors flow through transformError
 
 class WidgetsShowcaseScreen extends StatelessWidget {
   const WidgetsShowcaseScreen({super.key});
@@ -31,6 +33,7 @@ class WidgetsShowcaseScreen extends StatelessWidget {
       providers: [
         QueryProvider(create: (_) => PostsQueryController()),
         QueryProvider(create: (_) => CreatePostMutation()),
+        QueryProvider(create: (_) => _FailingMutation()),
         InfiniteQueryProvider(create: (_) => ProductsInfiniteController()),
       ],
       // ── MultiQueryListener: attach two side-effect listeners ─────
@@ -561,7 +564,115 @@ MultiQueryProvider(
           ),
         ),
 
-        // ── 12. MultiQueryListener ──────────────────────────────────
+        // ── 12. Error Handling ─────────────────────────────────────
+        _SectionHeader(
+          label: 'Error Handling',
+          description:
+              'Original errors from your API/service flow through directly — '
+              'even after retry exhaustion. transformError receives the real '
+              'error, not a wrapper.',
+        ),
+        _DemoCard(
+          widgetName: 'transformError + original error',
+          child: QueryBuilder<_FailingMutation, String>(
+            builder: (context, state) {
+              final mutation = context.query<_FailingMutation>();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _CodeLabel('''
+// Global transformError in main.dart:
+transformError: (error) {
+  if (error is ApiException) {
+    return 'Server error \${error.statusCode}: '
+           '\${error.message}';
+  }
+  return error;
+}
+
+// The original ApiException thrown by your
+// service is received directly — not wrapped
+// in QueryException.'''),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed:
+                        state.isLoading
+                            ? null
+                            : () => mutation.mutate(),
+                    icon: const Icon(Icons.error_outline, size: 16),
+                    label: const Text('Trigger failing mutation'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor:
+                          Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                  if (state.isError)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .errorContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'state.error:',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onErrorContainer,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${state.error}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onErrorContainer,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'error type: ${state.error.runtimeType}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onErrorContainer
+                                    .withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (state.isError)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: TextButton(
+                        onPressed: mutation.reset,
+                        child: const Text('Reset'),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+
+        // ── 13. MultiQueryListener ──────────────────────────────────
         _SectionHeader(
           label: 'MultiQueryListener',
           description:
@@ -981,6 +1092,23 @@ class _BoolBadge extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+/// A mutation that always fails with an [ApiException].
+/// Used in the Error Handling demo to show that the original error
+/// flows through to state.error and transformError unchanged.
+class _FailingMutation extends MutationController<String, void> {
+  @override
+  int get retryCount => 2;
+
+  @override
+  Duration get retryDelay => const Duration(milliseconds: 100);
+
+  @override
+  Future<String> mutationFn(void params) async {
+    // Simulate an API call that returns a 422 error.
+    throw ApiException(422, 'Validation failed: title is required');
   }
 }
 
