@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
 import 'package:query_client_example/app_observer.dart';
-import 'core/api_client.dart';
 import 'home_screen.dart';
 
 void main() {
