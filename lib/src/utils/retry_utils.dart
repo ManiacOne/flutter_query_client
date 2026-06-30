@@ -6,7 +6,8 @@ import 'package:flutter_query_client/src/models/query_exception.dart';
 ///
 /// Retries up to [maxAttempts] times. On each failure, waits an
 /// exponentially increasing delay starting from [baseDelay], capped at 30s.
-/// After exhausting retries, throws a [QueryException] wrapping the last error.
+/// After exhausting retries, rethrows the last error with its original
+/// stack trace so that user-thrown errors propagate unchanged.
 ///
 /// If [shouldAbort] is provided and returns `true` before a retry attempt,
 /// the retry loop exits immediately by throwing a [QueryException]. This is
@@ -36,11 +37,7 @@ Future<T> retryWithBackoff<T>({
       lastStackTrace = st;
       attempts++;
       if (attempts >= maxAttempts) {
-        throw QueryException(
-          'Operation failed after $attempts attempt(s)',
-          originalError: lastError,
-          stackTrace: lastStackTrace,
-        );
+        Error.throwWithStackTrace(lastError!, lastStackTrace!);
       }
       final delayMs = baseDelay.inMilliseconds * (1 << (attempts - 1));
       final cappedMs = delayMs > 30000 ? 30000 : delayMs;
