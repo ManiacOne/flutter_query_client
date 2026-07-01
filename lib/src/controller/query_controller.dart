@@ -324,7 +324,7 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
         fn: () => queryFn(capturedParams),
         maxAttempts: _resolvedRetryCount,
         baseDelay: _resolvedRetryDelay,
-        shouldAbort: _shouldPause ? () => true : null,
+        shouldAbort: () => _shouldPause,
       );
       if (_serializedParams != capturedSerialized) return; // params changed
 
@@ -370,7 +370,14 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
 
   // ─── Remount (hidden → visible) ───────────────────────────────────
 
-  /// Called by the provider when the widget transitions from hidden → visible.
+  /// Called by the provider when the widget transitions from hidden → visible
+  /// (e.g. switching tabs in an `IndexedStack` or toggling `Visibility`).
+  ///
+  /// **Note:** Has no effect when the provider is placed at the root level
+  /// (e.g. in `MultiQueryProvider` at the app root) because the widget never
+  /// unmounts or becomes hidden — so `refetchOnMount` will never trigger.
+  /// Use `updateCache`, `refetch`, or `invalidate` to push updates to a
+  /// root-level controller from child screens.
   void handleRemount() {
     if (!enabled) return;
     if (state.isLoading || state.isRefetching) return;
@@ -397,6 +404,8 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       );
     }
 
+    _startRefetchInterval();
+
     final rom = _resolvedRefetchOnMount;
     if (rom == RefetchOnMount.always ||
         (rom == RefetchOnMount.stale && cached.isStale)) {
@@ -420,8 +429,12 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       _serializedParams = serializeParams(_params);
     }
 
-    _serializedParams ??= serializeParams(_params);
-    final cached = client.get<T>(cacheKey, _serializedParams);
+    // Capture params to guard against concurrent setParams() calls.
+    final capturedParams = _params;
+    final capturedSerialized = _serializedParams ?? serializeParams(_params);
+    _serializedParams = capturedSerialized;
+
+    final cached = client.get<T>(cacheKey, capturedSerialized);
     if (cached != null && cached.data != null && !cached.isStale) {
       return cached.data;
     }
@@ -444,21 +457,27 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       }
     }
 
-    _serializedParams ??= serializeParams(_params);
     final completer = Completer<T>();
     _inFlightFetch = completer;
 
     try {
       _safeEmit(const QueryState(status: QueryStatus.loading));
       final result = await retryWithBackoff<T>(
-        fn: () => queryFn(_params),
+        fn: () => queryFn(capturedParams),
         maxAttempts: _resolvedRetryCount,
         baseDelay: _resolvedRetryDelay,
         shouldAbort: () => _shouldPause,
       );
+      if (_serializedParams != capturedSerialized) {
+        completer.completeError(
+          QueryException('Params changed during ensureData'),
+        );
+        completer.future.ignore();
+        throw QueryException('Params changed during ensureData');
+      }
       client.set(
         cacheKey,
-        _serializedParams,
+        capturedSerialized,
         CachedQueryData(
           data: result,
           fetchTime: DateTime.now(),
@@ -477,7 +496,10 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
           error: _applyTransformError(e),
         ),
       );
-      completer.completeError(e);
+      if (!completer.isCompleted) {
+        completer.completeError(e);
+        completer.future.ignore();
+      }
       rethrow;
     } finally {
       if (_inFlightFetch == completer) _inFlightFetch = null;
@@ -500,18 +522,23 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       return;
     }
 
+    // Capture params to guard against concurrent setParams() calls.
+    final capturedParams = _params;
+    final capturedSerialized = _serializedParams;
+
     QueryLogger.fine('[$cacheKey] Refetching...');
     _safeEmit(state.copyWith(fetchStatus: FetchStatus.refetching));
     try {
       final result = await retryWithBackoff<T>(
-        fn: () => queryFn(_params),
+        fn: () => queryFn(capturedParams),
         maxAttempts: _resolvedRetryCount,
         baseDelay: _resolvedRetryDelay,
         shouldAbort: () => _shouldPause,
       );
+      if (_serializedParams != capturedSerialized) return;
       client.set(
         cacheKey,
-        _serializedParams,
+        capturedSerialized,
         CachedQueryData(
           data: result,
           fetchTime: DateTime.now(),
@@ -521,21 +548,20 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       );
       _registerStaleListener();
       _startRefetchInterval();
-      _safeEmit(
-        state.copyWith(
-          status: QueryStatus.success,
-          data: result,
-          fetchStatus: FetchStatus.idle,
-          isStale: false,
-        ),
-      );
+      _safeEmit(QueryState<T>(
+        status: QueryStatus.success,
+        data: result,
+      ));
       onSuccess(result);
     } catch (e) {
+      if (_serializedParams != capturedSerialized) return;
       final transformed = _applyTransformError(e);
       _safeEmit(
         state.copyWith(
+          status: QueryStatus.error,
           error: transformed,
           fetchStatus: FetchStatus.idle,
+          isPlaceholderData: false,
         ),
       );
       onQueryError(transformed);
