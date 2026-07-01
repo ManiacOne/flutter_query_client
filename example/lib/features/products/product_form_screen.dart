@@ -115,19 +115,23 @@ class _ProductFormScreenBodyState extends State<_ProductFormScreenBody> {
                 ),
               );
             } else if (state.data != null) {
-              QueryClient.instance.updateInfiniteQuery<Product>('products', (
-                pages,
-              ) {
-                if (pages.isEmpty) {
-                  return [
-                    [state.data!],
-                  ];
-                }
-                return [
-                  [state.data!, ...pages[0]],
-                  ...pages.sublist(1),
-                ];
-              });
+              // QueryClient.instance.updateInfiniteQuery<Product>('products', (
+              //   pages,
+              // ) {
+              //   if (pages.isEmpty) {
+              //     return [
+              //       [state.data!],
+              //     ];
+              //   }
+              //   return [
+              //     [state.data!, ...pages[0]],
+              //     ...pages.sublist(1),
+              //   ];
+              // });
+              context.query<ProductsInfiniteController>().updateItem(
+                (item) => item.id == state.data!.id,
+                state.data!,
+              );
 
               Navigator.pop(ctx, state.data);
             }

@@ -32,8 +32,11 @@ class PostDetailScreen extends StatelessWidget {
                   SnackBar(
                     content: Row(
                       children: [
-                        const Icon(Icons.error_outline,
-                            color: Colors.white, size: 16),
+                        const Icon(
+                          Icons.error_outline,
+                          color: Colors.white,
+                          size: 16,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -54,8 +57,11 @@ class PostDetailScreen extends StatelessWidget {
                   SnackBar(
                     content: Row(
                       children: [
-                        const Icon(Icons.comment_outlined,
-                            color: Colors.white, size: 16),
+                        const Icon(
+                          Icons.comment_outlined,
+                          color: Colors.white,
+                          size: 16,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -128,16 +134,8 @@ class _PostDetailView extends StatelessWidget {
                 'staleTime: 30s override',
                 Colors.blue,
               ),
-              FeatureItem(
-                Icons.replay,
-                'refetchOnMount: always',
-                Colors.green,
-              ),
-              FeatureItem(
-                Icons.edit_note,
-                'updateCache()',
-                Colors.orange,
-              ),
+              FeatureItem(Icons.replay, 'refetchOnMount: always', Colors.green),
+              FeatureItem(Icons.edit_note, 'updateCache()', Colors.orange),
             ],
           ),
 
@@ -155,12 +153,12 @@ class _PostDetailView extends StatelessWidget {
                       children: [
                         Icon(Icons.error_outline, size: 48, color: cs.error),
                         const SizedBox(height: 12),
-                        Text('${postState.error}',
-                            textAlign: TextAlign.center),
+                        Text('${postState.error}', textAlign: TextAlign.center),
                         const SizedBox(height: 16),
                         FilledButton.icon(
-                          onPressed: () =>
-                              context.query<PostByIdController>().refetch(),
+                          onPressed:
+                              () =>
+                                  context.query<PostByIdController>().refetch(),
                           icon: const Icon(Icons.refresh),
                           label: const Text('Retry'),
                         ),
@@ -169,7 +167,11 @@ class _PostDetailView extends StatelessWidget {
                   );
                 }
 
-                final post = postState.data!;
+                final post = postState.data;
+
+                if (post == null) {
+                  return const Center(child: Text('Post not found'));
+                }
 
                 return SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
@@ -197,7 +199,8 @@ class _PostDetailView extends StatelessWidget {
                                         if (postState.isStale)
                                           Padding(
                                             padding: const EdgeInsets.only(
-                                                bottom: 6),
+                                              bottom: 6,
+                                            ),
                                             child: QueryStatusBadge(
                                               isPaused: false,
                                               isRefetching: false,
@@ -207,9 +210,10 @@ class _PostDetailView extends StatelessWidget {
                                           ),
                                         Text(
                                           post.title,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleLarge,
+                                          style:
+                                              Theme.of(
+                                                context,
+                                              ).textTheme.titleLarge,
                                         ),
                                       ],
                                     ),
@@ -225,7 +229,9 @@ class _PostDetailView extends StatelessWidget {
                               // User chip
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
                                 decoration: BoxDecoration(
                                   color: cs.primaryContainer,
                                   borderRadius: BorderRadius.circular(20),
@@ -272,8 +278,7 @@ class _PostDetailView extends StatelessWidget {
                                 padding: const EdgeInsets.all(12),
                                 child: Text(
                                   'Comments error: ${commentsState.error}',
-                                  style:
-                                      TextStyle(color: cs.onErrorContainer),
+                                  style: TextStyle(color: cs.onErrorContainer),
                                 ),
                               ),
                             );
@@ -289,14 +294,15 @@ class _PostDetailView extends StatelessWidget {
                                 children: [
                                   Text(
                                     'Comments',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium,
+                                    style:
+                                        Theme.of(context).textTheme.titleMedium,
                                   ),
                                   const SizedBox(width: 8),
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 2),
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: cs.secondaryContainer,
                                       borderRadius: BorderRadius.circular(12),
@@ -323,9 +329,7 @@ class _PostDetailView extends StatelessWidget {
                               ),
                               const SizedBox(height: 10),
                               // Comment list
-                              ...comments.map(
-                                (c) => _CommentTile(comment: c),
-                              ),
+                              ...comments.map((c) => _CommentTile(comment: c)),
                             ],
                           );
                         },
@@ -365,11 +369,12 @@ class _CommentTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final color = _avatarColor(comment.email);
-    final initials = comment.name
-        .split(' ')
-        .take(2)
-        .map((w) => w.isNotEmpty ? w[0].toUpperCase() : '')
-        .join();
+    final initials =
+        comment.name
+            .split(' ')
+            .take(2)
+            .map((w) => w.isNotEmpty ? w[0].toUpperCase() : '')
+            .join();
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -404,10 +409,7 @@ class _CommentTile extends StatelessWidget {
                     ),
                     Text(
                       comment.email,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: cs.primary,
-                      ),
+                      style: TextStyle(fontSize: 11, color: cs.primary),
                     ),
                     const SizedBox(height: 6),
                     Text(

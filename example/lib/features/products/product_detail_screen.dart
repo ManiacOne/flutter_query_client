@@ -97,7 +97,11 @@ class _ProductDetailView extends StatelessWidget {
             );
           }
 
-          final p = state.data!;
+          final p = state.data;
+
+          if (p == null) {
+            return const Center(child: Text('Product not found'));
+          }
 
           return SingleChildScrollView(
             child: Column(

@@ -22,10 +22,7 @@ class ProductsPaginatedScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InfiniteQueryProvider<ProductsInfiniteController>(
-      create: (_) => ProductsInfiniteController(),
-      child: const _ProductsView(),
-    );
+    return const _ProductsView();
   }
 }
 

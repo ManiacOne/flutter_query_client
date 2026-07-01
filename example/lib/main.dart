@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
 import 'package:query_client_example/app_observer.dart';
+import 'package:query_client_example/features/products/product_controllers.dart';
 import 'home_screen.dart';
 
 void main() {
@@ -39,17 +40,22 @@ class App extends StatelessWidget {
           return error;
         },
       ),
-      child: MaterialApp(
-        title: 'Query Client',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-        darkTheme: ThemeData(
-          colorSchemeSeed: Colors.indigo,
-          brightness: Brightness.dark,
-          useMaterial3: true,
+      child: MultiQueryProvider(
+        providers: [
+          QueryProvider(create: (ctx) => ProductsInfiniteController()),
+        ],
+        child: MaterialApp(
+          title: 'Query Client',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+          darkTheme: ThemeData(
+            colorSchemeSeed: Colors.indigo,
+            brightness: Brightness.dark,
+            useMaterial3: true,
+          ),
+          themeMode: ThemeMode.dark,
+          home: const HomeScreen(),
         ),
-        themeMode: ThemeMode.dark,
-        home: const HomeScreen(),
       ),
     );
   }
