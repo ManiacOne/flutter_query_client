@@ -1,3 +1,29 @@
+## 2.0.2
+
+### Fixes
+
+* **Fixed: `StaleListenerHandle` memory leak for void-params queries** — `unregister()` had an extra `&& _listenedParams != null` guard that prevented cleanup when `params` was `null` (the common case for controllers with no params). Every parameterless controller leaked a stale callback on `unregister()`. Guard removed — only callback presence is checked now.
+
+* **Fixed: `_refetchInternal` race condition** — params were read from `_serializedParams` after `await`, so a concurrent `setParams()` call could silently write results to the wrong cache key and emit state for a different query. Both controllers now capture `_serializedParams` before `await` and abort if it has changed after the fetch completes.
+
+* **Fixed: `copyWith` stale fields bleeding across state transitions** — `QueryController._refetchInternal`, `InfiniteQueryController._executeFirstPage`, `InfiniteQueryController._refetchInternal`, and `MutationController.mutate` all used `state.copyWith(status: ...)` on the error path. Because Freezed's `copyWith` preserves unmentioned fields, previous `isPlaceholderData`, `error`, or `fetchStatus` values could bleed into the new error state. All error emits now use fresh `QueryState<T>(...)` constructors with every field set explicitly.
+
+* **Fixed: `InfiniteQueryController.setParams` cache-hit not registering stale listener or refetch interval** — when `setParams` found a fresh cache hit it returned early without calling `_registerStaleListener()` or `_startRefetchInterval()`, so the stale callback and polling interval were never set up for the new params. Both are now called before the early return.
+
+* **Fixed: `_shouldPause` evaluated eagerly in `_execute`** — `shouldAbort` was constructed as `_shouldPause ? () => true : null` (evaluated once at call time), so if the controller was paused *after* the network call started, the abort flag was invisible to the retry loop. Changed to `() => _shouldPause` (re-evaluated on each retry iteration).
+
+* **Fixed: `ensureData` missing params staleness guard** — after the `await` in `ensureData`, `_serializedParams` was not rechecked, so a concurrent `setParams()` could cause stale data to be returned and emitted for the wrong params. Added the same capture-and-check pattern used in `_refetchInternal`.
+
+* **Fixed: `QueryClient.clear()` not clearing `_staleCallbacks`** — `clear()` cancelled stale timers but left `_staleCallbacks` populated, so callbacks for already-cleared entries could fire if a timer somehow ran before cancellation, or persist as a memory leak for long-running apps that call `clear()` between sessions.
+
+* **Fixed: `_onConnectivityChange` permanently removing throwing callbacks** — when a reconnect callback threw, it was caught and added to a pruning set, permanently unregistering a live controller's reconnect callback on the first transient error. Changed to log-and-continue; stale callbacks are handled at `unregisterReconnectCallback` time.
+
+* **Fixed: `InfiniteQueryController.loadMore` error not resetting `fetchStatus` to `idle`** — on a `loadMore` failure, `fetchStatus` stayed as `fetching`, leaving the controller in a stuck state where the UI could never trigger another `loadMore` call. `fetchStatus: FetchStatus.idle` is now set explicitly in the error emit.
+
+* **Fixed: `handleRemount` not restarting the refetch interval** — `handleRemount` called `_refetch()` but not `_startRefetchInterval()`, so polling stopped permanently after the first widget hide/show cycle. The interval is now restarted alongside the refetch. Note: `handleRemount` (and therefore `refetchOnMount`) has no effect when the controller's provider is mounted at the root level — root providers are never unmounted, so the hidden→visible transition never fires.
+
+---
+
 ## 2.0.1
 
 ### Fixes
