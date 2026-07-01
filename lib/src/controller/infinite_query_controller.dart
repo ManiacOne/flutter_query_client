@@ -17,6 +17,7 @@ import 'package:flutter_query_client/src/utils/query_logger.dart';
 import 'package:flutter_query_client/src/utils/refetch_interval_handle.dart';
 import 'package:flutter_query_client/src/utils/retry_utils.dart';
 import 'package:flutter_query_client/src/utils/stale_listener_handle.dart';
+
 /// Controller for cursor-based infinite pagination queries.
 ///
 /// [T] is the item type (e.g. Product).
@@ -63,17 +64,11 @@ abstract class InfiniteQueryController<T, PageParam, P>
   /// Stable reconnect callback reference.
   late final ReconnectCallback _onReconnect = _handleReconnect;
 
-  InfiniteQueryController(
-    this.cacheKey, {
-    ErrorTransformer? transformError,
-  })  : _transformError = transformError,
-        super(const QueryState()) {
+  InfiniteQueryController(this.cacheKey, {ErrorTransformer? transformError})
+    : _transformError = transformError,
+      super(const QueryState()) {
     final params = _serializeFilters(_filters);
-    client.registerActiveQuery(
-      cacheKey,
-      params,
-      onInvalidate: _onInvalidate,
-    );
+    client.registerActiveQuery(cacheKey, params, onInvalidate: _onInvalidate);
     _registerConnectivity();
     _executeFirstPage();
   }
@@ -181,7 +176,9 @@ abstract class InfiniteQueryController<T, PageParam, P>
   bool get _shouldPause {
     final mode = _resolvedNetworkMode;
     if (mode == NetworkMode.always) return false;
-    if (mode == NetworkMode.offlineFirst && !_offlineFirstExecuted) return false;
+    if (mode == NetworkMode.offlineFirst && !_offlineFirstExecuted) {
+      return false;
+    }
     return !client.isOnline;
   }
 
@@ -232,7 +229,9 @@ abstract class InfiniteQueryController<T, PageParam, P>
       return;
     }
 
-    QueryLogger.info('[$cacheKey] Refetching on reconnect (refetchOnReconnect: ${ror.name})');
+    QueryLogger.info(
+      '[$cacheKey] Refetching on reconnect (refetchOnReconnect: ${ror.name})',
+    );
     if (state.hasData) {
       _refetchInternal();
     } else {
@@ -262,12 +261,15 @@ abstract class InfiniteQueryController<T, PageParam, P>
   void setParams(P params) {
     final oldSerialized = _serializeFilters(_filters);
     final newSerialized = serializeParams(params);
-    final bool filtersChanged = _isInitialized && oldSerialized != newSerialized;
+    final bool filtersChanged =
+        _isInitialized && oldSerialized != newSerialized;
 
     if (filtersChanged) {
       // Capture previous data before clearing for keepPreviousData.
       final previousData =
-          keepPreviousData && _pages.isNotEmpty ? List<T>.from(_flatData) : null;
+          keepPreviousData && _pages.isNotEmpty
+              ? List<T>.from(_flatData)
+              : null;
 
       _saveToCache();
 
@@ -290,21 +292,24 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _registerConnectivity();
 
       if (_restoreFromCache(params)) {
-        _safeEmit(QueryState<List<T>>(
-          status: QueryStatus.success,
-          data: _flatData,
-        ));
+        _safeEmit(
+          QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
+        );
+        _registerStaleListener();
+        _startRefetchInterval();
         return;
       }
 
       // Emit placeholder data or reset to idle so _executeFirstPage
       // doesn't short-circuit on state.isLoading from a previous call.
       if (previousData != null && previousData.isNotEmpty) {
-        _safeEmit(QueryState<List<T>>(
-          status: QueryStatus.success,
-          data: previousData,
-          isPlaceholderData: true,
-        ));
+        _safeEmit(
+          QueryState<List<T>>(
+            status: QueryStatus.success,
+            data: previousData,
+            isPlaceholderData: true,
+          ),
+        );
       } else {
         _safeEmit(const QueryState());
       }
@@ -352,8 +357,10 @@ abstract class InfiniteQueryController<T, PageParam, P>
         if (i == 0) {
           _pageParams.add(initialPageParam);
         } else {
-          final nextParam =
-              getNextPageParam(_pages[i - 1], _pages.sublist(0, i));
+          final nextParam = getNextPageParam(
+            _pages[i - 1],
+            _pages.sublist(0, i),
+          );
           if (nextParam != null) {
             _pageParams.add(nextParam);
           }
@@ -386,11 +393,13 @@ abstract class InfiniteQueryController<T, PageParam, P>
         cacheKey,
         _serializeFilters(_filters),
       );
-      _safeEmit(QueryState<List<T>>(
-        status: QueryStatus.success,
-        data: _flatData,
-        isStale: cached?.isStale ?? false,
-      ));
+      _safeEmit(
+        QueryState<List<T>>(
+          status: QueryStatus.success,
+          data: _flatData,
+          isStale: cached?.isStale ?? false,
+        ),
+      );
       _registerStaleListener();
       _startRefetchInterval();
       final rom = _resolvedRefetchOnMount;
@@ -444,17 +453,17 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _registerStaleListener();
       _startRefetchInterval();
 
-      _safeEmit(QueryState<List<T>>(
-        status: QueryStatus.success,
-        data: _flatData,
-      ));
+      _safeEmit(
+        QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
+      );
       onSuccess(_flatData);
     } catch (e) {
       if (capturedVersion != _filterVersion) return;
       final transformed = _applyTransformError(e);
-      _safeEmit(state.copyWith(
+      _safeEmit(QueryState<List<T>>(
         status: QueryStatus.error,
         error: transformed,
+        data: state.data,
       ));
       onQueryError(transformed);
     }
@@ -462,7 +471,14 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
   // ─── Remount (hidden → visible) ───────────────────────────────────
 
-  /// Called by the provider when the widget transitions from hidden → visible.
+  /// Called by the provider when the widget transitions from hidden → visible
+  /// (e.g. switching tabs in an `IndexedStack` or toggling `Visibility`).
+  ///
+  /// **Note:** Has no effect when the provider is placed at the root level
+  /// (e.g. in `MultiQueryProvider` at the app root) because the widget never
+  /// unmounts or becomes hidden — so `refetchOnMount` will never trigger.
+  /// Use `updateItem`, `refetch`, or `invalidateAndRefresh` to push updates
+  /// to a root-level controller from child screens.
   void handleRemount() {
     if (!enabled) return;
     if (state.isLoading || state.isRefetching || state.isLoadingMore) return;
@@ -480,7 +496,10 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
     if (cached == null) return;
 
-    final cachedTotalLength = cached.data.fold<int>(0, (sum, p) => sum + p.length);
+    final cachedTotalLength = cached.data.fold<int>(
+      0,
+      (sum, p) => sum + p.length,
+    );
     if (_flatData.length != cachedTotalLength ||
         !identical(_flatData, state.data)) {
       _pages.clear();
@@ -490,18 +509,24 @@ abstract class InfiniteQueryController<T, PageParam, P>
         if (i == 0) {
           _pageParams.add(initialPageParam);
         } else {
-          final nextParam =
-              getNextPageParam(_pages[i - 1], _pages.sublist(0, i));
+          final nextParam = getNextPageParam(
+            _pages[i - 1],
+            _pages.sublist(0, i),
+          );
           if (nextParam != null) _pageParams.add(nextParam);
         }
       }
       _invalidateFlat();
-      _safeEmit(QueryState<List<T>>(
-        status: QueryStatus.success,
-        data: _flatData,
-        isStale: cached.isStale,
-      ));
+      _safeEmit(
+        QueryState<List<T>>(
+          status: QueryStatus.success,
+          data: _flatData,
+          isStale: cached.isStale,
+        ),
+      );
     }
+
+    _startRefetchInterval();
 
     final rom = _resolvedRefetchOnMount;
     if (rom == RefetchOnMount.always ||
@@ -548,10 +573,9 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _registerStaleListener();
       _startRefetchInterval();
 
-      _safeEmit(QueryState<List<T>>(
-        status: QueryStatus.success,
-        data: _flatData,
-      ));
+      _safeEmit(
+        QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
+      );
       onSuccess(_flatData);
     } catch (e) {
       if (capturedVersion != _filterVersion) return;
@@ -559,6 +583,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _safeEmit(state.copyWith(
         error: transformed,
         isLoadingMore: false,
+        fetchStatus: FetchStatus.idle,
       ));
       onQueryError(transformed);
     }
@@ -602,18 +627,21 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _registerStaleListener();
       _startRefetchInterval();
 
-      _safeEmit(QueryState<List<T>>(
-        status: QueryStatus.success,
-        data: _flatData,
-      ));
+      _safeEmit(
+        QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
+      );
       onSuccess(_flatData);
     } catch (e) {
       if (capturedVersion != _filterVersion) return;
       final transformed = _applyTransformError(e);
-      _safeEmit(state.copyWith(
-        error: transformed,
-        fetchStatus: FetchStatus.idle,
-      ));
+      _safeEmit(
+        state.copyWith(
+          status: QueryStatus.error,
+          error: transformed,
+          fetchStatus: FetchStatus.idle,
+          isPlaceholderData: false,
+        ),
+      );
       onQueryError(transformed);
     }
   }
@@ -641,14 +669,17 @@ abstract class InfiniteQueryController<T, PageParam, P>
       final idx = _pages[i].indexWhere(predicate);
       if (idx != -1) {
         _pages[i][idx] = updatedItem;
+        // Copy _flatCache BEFORE mutating — state.data still references
+        // the old list, so DeepCollectionEquality sees the difference.
+        // Single-pass List.of avoids the expand-from-pages iterator overhead.
         if (_flatCache != null) {
+          _flatCache = List<T>.of(_flatCache!);
           final flatIdx = _flatIndexOf(i, idx);
           if (flatIdx != -1) _flatCache![flatIdx] = updatedItem;
         }
-        _safeEmit(QueryState<List<T>>(
-          status: QueryStatus.success,
-          data: _flatData,
-        ));
+        _safeEmit(
+          QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
+        );
         return;
       }
     }
@@ -659,10 +690,9 @@ abstract class InfiniteQueryController<T, PageParam, P>
       page.removeWhere(predicate);
     }
     _invalidateFlat();
-    _safeEmit(QueryState<List<T>>(
-      status: QueryStatus.success,
-      data: _flatData,
-    ));
+    _safeEmit(
+      QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
+    );
   }
 
   void prependItem(T item) {
@@ -672,11 +702,11 @@ abstract class InfiniteQueryController<T, PageParam, P>
     } else {
       _pages.first.insert(0, item);
     }
-    _flatCache?.insert(0, item);
-    _safeEmit(QueryState<List<T>>(
-      status: QueryStatus.success,
-      data: _flatData,
-    ));
+    // Build a new list so state.data (old reference) differs.
+    _flatCache = _flatCache != null ? [item, ..._flatCache!] : null;
+    _safeEmit(
+      QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
+    );
   }
 
   void appendItem(T item) {
@@ -686,11 +716,11 @@ abstract class InfiniteQueryController<T, PageParam, P>
     } else {
       _pages.last.add(item);
     }
-    _flatCache?.add(item);
-    _safeEmit(QueryState<List<T>>(
-      status: QueryStatus.success,
-      data: _flatData,
-    ));
+    // Build a new list so state.data (old reference) differs.
+    _flatCache = _flatCache != null ? [..._flatCache!, item] : null;
+    _safeEmit(
+      QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
+    );
   }
 
   // ─── Stale listener management ───────────────────────────────────
