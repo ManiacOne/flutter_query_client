@@ -108,7 +108,7 @@ abstract class MutationController<T, P> extends Cubit<QueryState<T>> {
     } catch (e) {
       final transformed = _applyTransformError(e);
       QueryLogger.warning('[Mutation] Error: $transformed');
-      _safeEmit(state.copyWith(status: QueryStatus.error, error: transformed));
+      _safeEmit(QueryState<T>(status: QueryStatus.error, error: transformed));
       onMutationError(transformed);
       onSettled(null, transformed);
     }
