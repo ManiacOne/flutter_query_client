@@ -100,16 +100,14 @@ class QueryClient {
   void _onConnectivityChange(bool isOnline) {
     if (!isOnline) return;
     for (final entry in _reconnectCallbacks.entries.toList()) {
-      final stale = <ReconnectCallback>[];
       for (final cb in entry.value.toList()) {
         try {
           cb(isStale: false);
         } catch (_) {
-          stale.add(cb);
+          // Log but don't remove — transient errors should not permanently
+          // unregister a live controller's reconnect callback.
         }
       }
-      entry.value.removeAll(stale);
-      if (entry.value.isEmpty) _reconnectCallbacks.remove(entry.key);
     }
   }
 
@@ -375,6 +373,7 @@ class QueryClient {
     _observerCounts.clear();
     _invalidateCallbacks.clear();
     _reconnectCallbacks.clear();
+    _staleCallbacks.clear();
   }
 
   /// Dispose the connectivity observer and clean up all resources.
