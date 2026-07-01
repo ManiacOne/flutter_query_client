@@ -33,7 +33,7 @@ class StaleListenerHandle {
 
   /// Unregister the currently active stale listener, if any.
   void unregister() {
-    if (_staleCallback != null && _listenedParams != null) {
+    if (_staleCallback != null) {
       _client.removeStaleListener(_cacheKey, _listenedParams, _staleCallback!);
       _staleCallback = null;
       _listenedParams = null;
