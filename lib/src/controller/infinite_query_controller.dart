@@ -426,6 +426,11 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
     await Future.delayed(Duration.zero);
 
+    // A concurrent setParams() call may have already restored state from
+    // cache for the new filters — bail out before emitting loading so we
+    // don't clobber it with this stale call's state.
+    if (capturedVersion != _filterVersion) return;
+
     // keepPreviousData: if setParams already placed placeholder data, keep it
     // visible instead of flashing a loading spinner.
     if (!state.isPlaceholderData) {

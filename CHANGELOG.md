@@ -1,3 +1,11 @@
+## 2.0.3
+
+### Fixes
+
+* **Fixed: `InfiniteQueryController` constructor races with an initial `setParams` call** — the constructor fires `_executeFirstPage()` unawaited, before any filters are set. If a consumer calls `setParams(...)` synchronously right after construction (the idiomatic place to apply initial filters, e.g. in `initState()`), the constructor's stale call could resume after `setParams` had already restored a `success` state from cache, and unconditionally overwrite it with `loading` — since that emit wasn't guarded by the `_filterVersion` check used everywhere else in the method. Because the version check only ran *after* the fetch completed, the eventual result was discarded and no state was ever emitted to correct the spurious `loading`, leaving the UI stuck indefinitely despite valid cached data. The `_filterVersion` guard is now checked immediately after the `await Future.delayed(Duration.zero)`, before the `loading` emit, matching the pattern already used in the cache-restore and paused branches above it.
+
+---
+
 ## 2.0.2
 
 ### Fixes
