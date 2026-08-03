@@ -1,7 +1,7 @@
 import 'package:flutter_query_client/src/enums/network_mode.dart';
 import 'package:flutter_query_client/src/enums/refetch_on_mount.dart';
 import 'package:flutter_query_client/src/enums/refetch_on_reconnect.dart';
-import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
+import 'package:flutter_query_client/src/network/probe_target.dart';
 import 'package:logging/logging.dart';
 
 /// Signature for error transformation callbacks.
@@ -26,6 +26,17 @@ class QueryDefaults {
   final NetworkMode? networkMode;
   final RefetchOnReconnect? refetchOnReconnect;
 
+  /// Hosts the native connectivity probe attempts to reach when confirming
+  /// reachability (used only as a tiebreaker — the app's own request outcomes
+  /// are the primary online/offline signal).
+  ///
+  /// Defaults to Cloudflare's anycast anchors on port 443. **For the most
+  /// accurate result across all regions, set this to your own backend host**
+  /// (e.g. `[ProbeTarget('api.myapp.com')]`) — a reachable backend means
+  /// "online" for your app, and avoids region-specific blocking of public
+  /// anchors. When `null`, the built-in defaults are used.
+  final List<ProbeTarget>? connectivityProbeTargets;
+
   /// The default first-page parameter for every [InfiniteQueryController]
   /// that does not override [InfiniteQueryController.initialPageParam].
   ///
@@ -41,14 +52,6 @@ class QueryDefaults {
   /// Defaults to `20`. Set this once here instead of repeating it in every
   /// controller subclass.
   final int limit;
-
-  /// Custom endpoints for internet reachability checks.
-  ///
-  /// By default, `internet_connection_checker_plus` checks Cloudflare,
-  /// Google CDN, icanhazip, and Apple captive portal endpoints.
-  /// Override this for corporate/private networks where public endpoints
-  /// may be unreachable (e.g. behind a proxy or firewall).
-  final List<InternetCheckOption>? connectivityEndpoints;
 
   /// Whether to enable internal logging for flutter_query.
   ///
@@ -72,9 +75,9 @@ class QueryDefaults {
     this.transformError,
     this.networkMode,
     this.refetchOnReconnect,
+    this.connectivityProbeTargets,
     this.initialPageParam = 0,
     this.limit = 20,
-    this.connectivityEndpoints,
     this.enableLogging = false,
     this.logLevel,
     this.onLog,

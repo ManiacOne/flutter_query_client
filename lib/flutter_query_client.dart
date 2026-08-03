@@ -22,11 +22,11 @@ export './src/extensions.dart';
 export './src/models/cached_query_data.dart';
 export './src/models/query_defaults.dart';
 export './src/models/query_exception.dart';
+export './src/enums/connectivity_status.dart';
 export './src/enums/query_status.dart';
 export './src/enums/refetch_on_mount.dart';
 export './src/enums/network_mode.dart';
 export './src/enums/refetch_on_reconnect.dart';
 export './src/network/network_connectivity_observer.dart';
+export './src/network/probe_target.dart';
 export './src/utils/query_logger.dart';
-export 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart'
-    show InternetCheckOption;

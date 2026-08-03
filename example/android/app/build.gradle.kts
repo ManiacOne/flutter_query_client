@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.example.query_client_example"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -24,7 +24,9 @@ android {
         applicationId = "com.example.query_client_example"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // flutter_query_client's native connectivity plugin requires API 24+
+        // (ConnectivityManager.registerDefaultNetworkCallback).
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

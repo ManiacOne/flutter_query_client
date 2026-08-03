@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
 import 'package:flutter_query_client/src/helpers.dart';
 import 'package:flutter_query_client/src/utils/error_transform_utils.dart';
+import 'package:flutter_query_client/src/utils/network_error.dart';
 import 'package:flutter_query_client/src/utils/refetch_interval_handle.dart';
 import 'package:flutter_query_client/src/utils/retry_utils.dart';
 import 'package:flutter_query_client/src/utils/stale_listener_handle.dart';
@@ -79,6 +80,9 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
   ErrorTransformer? get transformError => _transformError;
 
   Object _applyTransformError(Object error) {
+    // A network-type failure asks the observer to confirm reachability (it
+    // won't flip offline on this alone). Server errors are left untouched.
+    if (isNetworkError(error)) client.reportUnreachable();
     return applyErrorTransform(
       error: error,
       controllerTransform: transformError,
@@ -346,6 +350,7 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       _registerStaleListener();
       _startRefetchInterval();
       QueryLogger.info('[$cacheKey] Fetch success');
+      client.reportReachable();
       _safeEmit(QueryState<T>(status: QueryStatus.success, data: result));
       if (!completer.isCompleted) completer.complete(result);
       onSuccess(result);
@@ -486,6 +491,7 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
         ),
       );
       _registerStaleListener();
+      client.reportReachable();
       _safeEmit(QueryState<T>(status: QueryStatus.success, data: result));
       completer.complete(result);
       return result;
@@ -548,6 +554,7 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       );
       _registerStaleListener();
       _startRefetchInterval();
+      client.reportReachable();
       _safeEmit(QueryState<T>(
         status: QueryStatus.success,
         data: result,

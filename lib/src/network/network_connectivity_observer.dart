@@ -1,36 +1,66 @@
 import 'dart:async';
 
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/services.dart';
-import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 
 import '../utils/query_logger.dart';
+import 'native_connectivity_channel.dart';
+import 'probe_target.dart';
 
-/// Observes network connectivity using `internet_connection_checker_plus`
-/// for true L7 internet verification (HTTP HEAD requests to reliable endpoints),
-/// with `connectivity_plus` wired as a trigger stream for faster detection.
+/// Observes device internet connectivity, the way production apps do it:
+/// the app's own request outcomes are the primary source of truth, an OS
+/// event provides an instant trigger, and an active probe is only a
+/// confirmation/tiebreaker.
 ///
-/// Key design principles:
-/// - **True internet verification**: Unlike `connectivity_plus` alone (which only
-///   detects L2/L3 interface status), this observer verifies actual internet
-///   reachability via HTTP HEAD requests to multiple endpoints.
-/// - **Single instance**: Resources are created once and kept alive for the
-///   lifetime of the observer. They are never recreated.
-/// - **Debounced events**: Rapid connectivity changes (common during app
-///   background/foreground transitions) are debounced with a 500ms window
-///   to prevent unnecessary refetch storms.
-/// - **Lazy initialization**: Call [initialize] to start listening. Before
-///   initialization, [isOnline] defaults to `true` to avoid false pauses.
+/// Signals, in order of authority:
+/// 1. **Request outcomes ([reportReachable] / [reportUnreachable]).** A query
+///    that *succeeds* proves the device is online — nothing is more
+///    authoritative, and it costs no extra network traffic. This also
+///    self-corrects a false "offline" (e.g. a probe anchor blocked in some
+///    region while the app's own API is perfectly reachable). A query that
+///    *fails with a network error* does **not** flip us offline directly —
+///    one failure could be a single dead endpoint — it only requests a
+///    confirmation probe.
+/// 2. **OS path-change hints.** [NativeConnectivityChannel.onNetworkChangeHint]
+///    fires the instant an interface changes; the observer responds by
+///    re-checking, so detection is immediate rather than waiting for a poll.
+/// 3. **Active probe ([NativeConnectivityChannel.isConnected]).** A short TCP
+///    connect (default port 443; target configurable via [probeTargets]) used
+///    to confirm/deny connectivity when there is no recent request outcome to
+///    judge by.
+///
+/// This ordering matters because in this package a confirmed `offline→online`
+/// transition triggers a refetch across *every* registered controller — so
+/// "online" must be trustworthy (a real success or a confirmed probe), and a
+/// lone failure must never be able to storm the app offline-then-online.
+///
+/// Concurrent checks are ordered by a monotonic sequence so an out-of-order
+/// probe completion can never overwrite a newer result (including a request
+/// outcome that arrived while a probe was in flight).
 class NetworkConnectivityObserver {
   static NetworkConnectivityObserver? _instance;
 
   /// When `true`, [initialize] is a no-op and [isOnline] always returns `true`.
-  /// Set this in test setUp to prevent real HTTP calls.
+  /// Set this in test setUp to prevent real platform channel calls.
   static bool testMode = false;
 
-  InternetConnection? _internetConnection;
-  StreamSubscription<InternetStatus>? _subscription;
-  Timer? _debounceTimer;
+  /// Hosts the active probe attempts to reach. Defaults to Cloudflare's
+  /// anycast anchors on port 443. Override via
+  /// [QueryDefaults.connectivityProbeTargets] — ideally with your own backend.
+  static List<ProbeTarget> probeTargets = const [
+    ProbeTarget('1.1.1.1'),
+    ProbeTarget('1.0.0.1'),
+  ];
+
+  Timer? _pollTimer;
+  Timer? _hintDebounce;
+  StreamSubscription<dynamic>? _hintSubscription;
+
+  /// Monotonic counter used to discard the results of superseded checks.
+  int _checkSeq = 0;
+
+  /// When a request last proved the device reachable — lets the backstop poll
+  /// skip probing while real traffic is already confirming connectivity.
+  DateTime? _lastReachableAt;
 
   bool _isOnline = true;
   bool _isInitialized = false;
@@ -50,15 +80,22 @@ class NetworkConnectivityObserver {
 
   int get listenerCount => _activeListenerCount;
 
-  /// Debounce duration for rapid connectivity events.
-  static const _debounceDuration = Duration(milliseconds: 500);
+  /// Backstop interval on which the active probe is re-run when there is no
+  /// recent request outcome. Only a safety net — instant detection comes from
+  /// request outcomes and OS hints. Kept modest to conserve battery.
+  ///
+  /// Mutable (rather than `const`) so tests can shorten it.
+  static Duration pollInterval = const Duration(seconds: 15);
+
+  /// How long to coalesce a burst of OS change hints / failure reports before
+  /// probing. Short enough to still feel instant.
+  ///
+  /// Mutable (rather than `const`) so tests can shorten it.
+  static Duration hintDebounce = const Duration(milliseconds: 250);
 
   NetworkConnectivityObserver._();
 
   /// Returns the shared singleton instance.
-  ///
-  /// The observer is NOT automatically initialized. Call [initialize] to
-  /// start listening for connectivity changes.
   static NetworkConnectivityObserver get instance {
     return _instance ??= NetworkConnectivityObserver._();
   }
@@ -72,58 +109,28 @@ class NetworkConnectivityObserver {
   /// Whether the observer has been initialized and is actively listening.
   bool get isInitialized => _isInitialized;
 
-  /// A debounced stream of connectivity status changes.
-  ///
-  /// Emits `true` when the device comes online and `false` when it goes
-  /// offline. Rapid-fire events are coalesced within a 500ms window.
+  /// A stream of connectivity status changes.
   Stream<bool> get onStatusChange => _controller.stream;
 
-  /// Start listening for connectivity changes.
+  /// Start observing connectivity changes.
   ///
   /// Safe to call multiple times — subsequent calls are no-ops.
-  /// Uses `connectivity_plus` as a trigger stream so that interface-level
-  /// changes (WiFi on/off) immediately trigger an internet check, rather
-  /// than waiting for the default 10s polling interval.
-  ///
-  /// [customEndpoints] allows overriding the default check endpoints used by
-  /// `internet_connection_checker_plus`. Useful for corporate/private networks
-  /// where public endpoints may be unreachable.
-  ///
   /// Gracefully handles missing platform bindings (e.g. in test environments
   /// without `TestWidgetsFlutterBinding.ensureInitialized()`).
-  Future<void> initialize({
-    List<InternetCheckOption>? customEndpoints,
-  }) async {
+  Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
 
-    // In test mode, skip real network initialization entirely.
+    // In test mode, skip real platform channel calls entirely.
     if (testMode) return;
 
     // Platform channels require ServicesBinding — bail early if unavailable.
     if (!_isBindingInitialized) return;
 
     try {
-      // Create connectivity_plus instance as a trigger stream for faster
-      // detection. When the network interface changes, it immediately triggers
-      // an actual internet check instead of waiting for the poll interval.
-      final connectivity = Connectivity();
-      final triggerStream = connectivity.onConnectivityChanged;
-
-      _internetConnection = InternetConnection.createInstance(
-        checkInterval: const Duration(seconds: 30),
-        triggerStream: triggerStream,
-        customCheckOptions: customEndpoints,
+      _isOnline = await NativeConnectivityChannel.isConnected(
+        targets: probeTargets,
       );
-    } catch (_) {
-      QueryLogger.warning(
-        '[NetworkObserver] Failed to create InternetConnection instance',
-      );
-      return;
-    }
-
-    try {
-      _isOnline = await _internetConnection!.hasInternetAccess;
       QueryLogger.info(
         '[NetworkObserver] Initial status: ${_isOnline ? "online" : "offline"}',
       );
@@ -131,11 +138,96 @@ class NetworkConnectivityObserver {
       _isOnline = true;
     }
 
+    // Instant, event-driven detection: re-probe the moment the OS reports a
+    // network path change. The hint is only a trigger — a probe or request
+    // outcome remains the source of truth.
     try {
-      _subscription =
-          _internetConnection!.onStatusChange.listen(_onStatusEvent);
+      _hintSubscription = NativeConnectivityChannel.onNetworkChangeHint.listen(
+        (_) => _scheduleRecheck(),
+        onError: (_) {
+          // Event channel unavailable — polling backstop still covers us.
+        },
+      );
     } catch (_) {
-      // Stream unavailable — observer reports based on initial check.
+      // Event channel not wired on this platform — rely on polling.
+    }
+
+    // Backstop: probe on a fixed cadence, but only when no recent request has
+    // already proven reachability.
+    _pollTimer = Timer.periodic(pollInterval, (_) {
+      final last = _lastReachableAt;
+      if (last != null && DateTime.now().difference(last) < pollInterval) {
+        return; // real traffic is already confirming we're online
+      }
+      _recheck();
+    });
+  }
+
+  // ─── Primary signal: request outcomes ──────────────────────────────
+
+  /// Report that a real network request **succeeded**.
+  ///
+  /// This is the most authoritative "online" signal — the server was reached.
+  /// Flips the status online immediately (superseding any in-flight probe) and,
+  /// on an `offline→online` transition, drives the package's reconnect refetch.
+  void reportReachable() {
+    _lastReachableAt = DateTime.now();
+    // A confirmed success wins over anything a slower probe might report:
+    // bump the sequence to discard any probe already in flight, and cancel a
+    // pending (debounced) confirmation probe that hasn't started yet — both
+    // would otherwise apply a now-stale "offline" after this.
+    _checkSeq++;
+    _hintDebounce?.cancel();
+    _hintDebounce = null;
+    _applyStatus(true);
+  }
+
+  /// Report that a request **failed with a network-type error**.
+  ///
+  /// Deliberately does *not* set the status offline on its own — a single
+  /// failure could be one dead endpoint. It only schedules a confirmation
+  /// probe; the status flips offline only if that probe (or the OS/backstop)
+  /// agrees.
+  void reportUnreachable() {
+    _scheduleRecheck();
+  }
+
+  // ─── Recheck / probe ───────────────────────────────────────────────
+
+  /// Coalesce a burst of OS hints / failure reports into a single probe.
+  void _scheduleRecheck() {
+    _hintDebounce?.cancel();
+    _hintDebounce = Timer(hintDebounce, _recheck);
+  }
+
+  /// Run a fresh active probe and apply the result if it hasn't been
+  /// superseded by a newer check (probe or request outcome).
+  Future<void> _recheck() async {
+    final seq = ++_checkSeq;
+    bool isConnected;
+    try {
+      isConnected = await NativeConnectivityChannel.isConnected(
+        targets: probeTargets,
+      );
+    } catch (_) {
+      // Transient channel error — keep the last known value.
+      return;
+    }
+
+    if (seq != _checkSeq) return; // a newer check superseded this probe
+    if (isConnected) _lastReachableAt = DateTime.now();
+    _applyStatus(isConnected);
+  }
+
+  /// Set the status and emit only on a genuine change.
+  void _applyStatus(bool online) {
+    final wasOnline = _isOnline;
+    _isOnline = online;
+    if (wasOnline != online) {
+      QueryLogger.info(
+        '[NetworkObserver] Status changed: ${online ? "online" : "offline"}',
+      );
+      _controller.add(online);
     }
   }
 
@@ -149,178 +241,19 @@ class NetworkConnectivityObserver {
     }
   }
 
-  void _onStatusEvent(InternetStatus status) {
-    // Cancel any pending debounce to coalesce rapid events.
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(_debounceDuration, () {
-      final wasOnline = _isOnline;
-      _isOnline = status == InternetStatus.connected;
-
-      if (wasOnline != _isOnline) {
-        QueryLogger.info(
-          '[NetworkObserver] Status changed: ${_isOnline ? "online" : "offline"}',
-        );
-        _controller.add(_isOnline);
-      }
-    });
-  }
-
   /// Clean up resources. After disposal, the singleton is reset and
   /// [initialize] must be called again on a new instance.
   void dispose() {
-    _debounceTimer?.cancel();
-    _debounceTimer = null;
-    _subscription?.cancel();
-    _subscription = null;
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _hintDebounce?.cancel();
+    _hintDebounce = null;
+    _hintSubscription?.cancel();
+    _hintSubscription = null;
     _broadcastController?.close();
     _activeListenerCount = 0;
     _isInitialized = false;
+    _lastReachableAt = null;
     _instance = null;
   }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Previous implementation using connectivity_plus only (L2/L3 detection).
-// Kept for reference — connectivity_plus has known inversion bugs where
-// WiFi off reports "wifi" and WiFi on reports "none".
-// ═══════════════════════════════════════════════════════════════════════════
-//
-// import 'dart:async';
-//
-// import 'package:connectivity_plus/connectivity_plus.dart';
-// import 'package:flutter/services.dart';
-//
-// import '../utils/query_logger.dart';
-//
-// /// Observes network connectivity changes using `connectivity_plus`.
-// ///
-// /// Key design principles:
-// /// - **Single instance**: One [Connectivity] object is created and kept alive
-// ///   for the lifetime of the observer. It is never recreated.
-// /// - **Debounced events**: Rapid connectivity changes (common during app
-// ///   background/foreground transitions) are debounced with a 500ms window
-// ///   to prevent unnecessary refetch storms.
-// /// - **Lazy initialization**: Call [initialize] to start listening. Before
-// ///   initialization, [isOnline] defaults to `true` to avoid false pauses.
-// ///
-// /// Note: `connectivity_plus` reports L2/L3 connectivity (WiFi/mobile
-// /// association) but does NOT verify actual internet reachability. Captive
-// /// portals, DNS failures, and ISP outages will still report as "connected."
-// class NetworkConnectivityObserver {
-//   static NetworkConnectivityObserver? _instance;
-//
-//   Connectivity? _connectivity;
-//   StreamSubscription<List<ConnectivityResult>>? _subscription;
-//   Timer? _debounceTimer;
-//
-//   bool _isOnline = true;
-//   bool _isInitialized = false;
-//
-//   final _controller = StreamController<bool>.broadcast();
-//
-//   /// Debounce duration for rapid connectivity events.
-//   static const _debounceDuration = Duration(milliseconds: 500);
-//
-//   NetworkConnectivityObserver._();
-//
-//   /// Returns the shared singleton instance.
-//   ///
-//   /// The observer is NOT automatically initialized. Call [initialize] to
-//   /// start listening for connectivity changes.
-//   static NetworkConnectivityObserver get instance {
-//     return _instance ??= NetworkConnectivityObserver._();
-//   }
-//
-//   /// Whether the device currently has network connectivity.
-//   ///
-//   /// Defaults to `true` before [initialize] is called to prevent queries
-//   /// from starting in a paused state on a connected device.
-//   bool get isOnline => _isOnline;
-//
-//   /// Whether the observer has been initialized and is actively listening.
-//   bool get isInitialized => _isInitialized;
-//
-//   /// A debounced stream of connectivity status changes.
-//   ///
-//   /// Emits `true` when the device comes online and `false` when it goes
-//   /// offline. Rapid-fire events are coalesced within a 500ms window.
-//   Stream<bool> get onStatusChange => _controller.stream;
-//
-//   /// Start listening for connectivity changes.
-//   ///
-//   /// Safe to call multiple times — subsequent calls are no-ops.
-//   /// Performs an initial connectivity check and then listens for changes.
-//   /// Gracefully handles missing platform bindings (e.g. in test environments
-//   /// without `TestWidgetsFlutterBinding.ensureInitialized()`).
-//   Future<void> initialize() async {
-//     if (_isInitialized) return;
-//     _isInitialized = true;
-//
-//     // Platform channels require ServicesBinding — bail early if unavailable.
-//     if (!_isBindingInitialized) return;
-//
-//     try {
-//       _connectivity = Connectivity();
-//     } catch (_) {
-//       return;
-//     }
-//
-//     try {
-//       final result = await _connectivity!.checkConnectivity();
-//       _isOnline = _hasConnectivity(result);
-//     } catch (_) {
-//       _isOnline = true;
-//     }
-//
-//     try {
-//       _subscription = _connectivity!.onConnectivityChanged.listen(_onEvent);
-//     } catch (_) {
-//       // Platform channel not available — observer reports based on initial check.
-//     }
-//   }
-//
-//   /// Whether the Flutter services binding has been initialized.
-//   static bool get _isBindingInitialized {
-//     try {
-//       ServicesBinding.instance;
-//       return true;
-//     } catch (_) {
-//       return false;
-//     }
-//   }
-//
-//   void _onEvent(List<ConnectivityResult> results) {
-//     // Cancel any pending debounce to coalesce rapid events.
-//     _debounceTimer?.cancel();
-//     _debounceTimer = Timer(_debounceDuration, () {
-//       final wasOnline = _isOnline;
-//       _isOnline = _hasConnectivity(results);
-//
-//       if (wasOnline != _isOnline) {
-//         QueryLogger.info(
-//           '[NetworkObserver] Status changed: ${_isOnline ? "online" : "offline"} (raw: $results)',
-//         );
-//         _controller.add(_isOnline);
-//       }
-//     });
-//   }
-//
-//   /// Returns `true` if at least one result indicates connectivity
-//   /// (anything other than [ConnectivityResult.none]).
-//   static bool _hasConnectivity(List<ConnectivityResult> results) {
-//     if (results.isEmpty) return false;
-//     return results.any((r) => r != ConnectivityResult.none);
-//   }
-//
-//   /// Clean up resources. After disposal, the singleton is reset and
-//   /// [initialize] must be called again on a new instance.
-//   void dispose() {
-//     _debounceTimer?.cancel();
-//     _debounceTimer = null;
-//     _subscription?.cancel();
-//     _subscription = null;
-//     _controller.close();
-//     _isInitialized = false;
-//     _instance = null;
-//   }
-// }

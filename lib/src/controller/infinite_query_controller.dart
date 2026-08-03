@@ -13,6 +13,7 @@ import 'package:flutter_query_client/src/models/cached_query_data.dart';
 import 'package:flutter_query_client/src/models/query_defaults.dart';
 import 'package:flutter_query_client/src/query_state.dart';
 import 'package:flutter_query_client/src/utils/error_transform_utils.dart';
+import 'package:flutter_query_client/src/utils/network_error.dart';
 import 'package:flutter_query_client/src/utils/query_logger.dart';
 import 'package:flutter_query_client/src/utils/refetch_interval_handle.dart';
 import 'package:flutter_query_client/src/utils/retry_utils.dart';
@@ -86,6 +87,9 @@ abstract class InfiniteQueryController<T, PageParam, P>
   ErrorTransformer? get transformError => _transformError;
 
   Object _applyTransformError(Object error) {
+    // A network-type failure asks the observer to confirm reachability (it
+    // won't flip offline on this alone). Server errors are left untouched.
+    if (isNetworkError(error)) client.reportUnreachable();
     return applyErrorTransform(
       error: error,
       controllerTransform: transformError,
@@ -458,6 +462,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _registerStaleListener();
       _startRefetchInterval();
 
+      client.reportReachable();
       _safeEmit(
         QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
       );
@@ -578,6 +583,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _registerStaleListener();
       _startRefetchInterval();
 
+      client.reportReachable();
       _safeEmit(
         QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
       );
@@ -632,6 +638,7 @@ abstract class InfiniteQueryController<T, PageParam, P>
       _registerStaleListener();
       _startRefetchInterval();
 
+      client.reportReachable();
       _safeEmit(
         QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
       );

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:bloc/bloc.dart' show Bloc, BlocObserver;
 import 'package:flutter/widgets.dart';
+import 'package:flutter_query_client/src/enums/connectivity_status.dart';
 import 'package:flutter_query_client/src/enums/network_mode.dart';
 import 'package:flutter_query_client/src/enums/refetch_on_reconnect.dart';
 import 'package:flutter_query_client/src/models/cached_query_data.dart';
@@ -42,6 +43,9 @@ class QueryClient {
   /// Registry of reconnect callbacks keyed by serialized key.
   /// Each active controller with networkMode != always registers here.
   final Map<String, Set<ReconnectCallback>> _reconnectCallbacks = {};
+
+  /// External callback registered via [QueryClientProvider.onConnectivityChanged].
+  void Function(ConnectivityStatus status)? _externalConnectivityCallback;
 
   // ─── Global defaults ─────────────────────────────────────────────
 
@@ -85,10 +89,14 @@ class QueryClient {
   Future<void> ensureConnectivityInitialized() async {
     if (_networkObserver != null) return;
     _networkObserver = NetworkConnectivityObserver.instance;
+    // Apply the configured probe targets (ideally the app's own backend)
+    // before initialization kicks off the first probe.
+    final targets = _defaults.connectivityProbeTargets;
+    if (targets != null && targets.isNotEmpty) {
+      NetworkConnectivityObserver.probeTargets = targets;
+    }
     try {
-      await _networkObserver!.initialize(
-        customEndpoints: _defaults.connectivityEndpoints,
-      );
+      await _networkObserver!.initialize();
       _connectivitySubscription =
           _networkObserver!.onStatusChange.listen(_onConnectivityChange);
     } catch (_) {
@@ -97,7 +105,31 @@ class QueryClient {
     }
   }
 
+  /// Registers the callback invoked on every connectivity change (both
+  /// online→offline and offline→online transitions).
+  ///
+  /// Set via [QueryClientProvider.onConnectivityChanged].
+  void setConnectivityChangedCallback(
+    void Function(ConnectivityStatus status)? callback,
+  ) {
+    _externalConnectivityCallback = callback;
+  }
+
+  /// Report that a real network request succeeded — the most authoritative
+  /// "online" signal. Called by controllers on every successful fetch; a
+  /// no-op if connectivity has not been initialized.
+  void reportReachable() => _networkObserver?.reportReachable();
+
+  /// Report that a request failed with a network-type error. Does not flip
+  /// the status offline directly — it asks the observer to confirm with a
+  /// probe. A no-op if connectivity has not been initialized.
+  void reportUnreachable() => _networkObserver?.reportUnreachable();
+
   void _onConnectivityChange(bool isOnline) {
+    _externalConnectivityCallback?.call(
+      isOnline ? ConnectivityStatus.online : ConnectivityStatus.offline,
+    );
+
     if (!isOnline) return;
     for (final entry in _reconnectCallbacks.entries.toList()) {
       for (final cb in entry.value.toList()) {
