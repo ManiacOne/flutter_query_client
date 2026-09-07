@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
 import 'package:query_client_example/app_observer.dart';
+import 'package:query_client_example/features/navigation_refetch/controllers/notes_controllers.dart';
 import 'package:query_client_example/features/products/product_controllers.dart';
 import 'package:query_client_example/widgets/connectivity_banner.dart';
 import 'home_screen.dart';
@@ -44,10 +45,17 @@ class App extends StatelessWidget {
       child: MultiQueryProvider(
         providers: [
           QueryProvider(create: (ctx) => ProductsInfiniteController()),
+          // Provided at the ROOT (never unmounts). The "Navigation Refetch →
+          // Global controller" scenario proves a builder deep in the tree still
+          // refetches it on pop-back — detection lives at the builder, not here.
+          QueryProvider(create: (ctx) => GlobalStatsController()),
         ],
         child: MaterialApp(
           title: 'Query Client',
           debugShowCheckedModeBanner: false,
+          // Install once — lets providers detect Navigator push/pop and refetch
+          // on return (the "Navigation Refetch" drawer section demonstrates it).
+          navigatorObservers: [QueryNavigatorObserver.instance],
           theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
           darkTheme: ThemeData(
             colorSchemeSeed: Colors.indigo,

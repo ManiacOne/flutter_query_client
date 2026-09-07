@@ -1,72 +1,18 @@
 import 'package:flutter/material.dart';
-import 'features/inefficiency_demos/inefficiency_demos_screen.dart';
-import 'features/posts/posts_list_screen.dart';
-import 'features/products/products_paginated_screen.dart';
-import 'features/showcase/widgets_showcase_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+import 'app_navigation.dart';
+
+/// Renders the currently-selected drawer section. Each section is a full
+/// `Scaffold` that embeds the shared [AppDrawer], so navigation is driven by
+/// [selectedSection] rather than a bottom navigation bar.
+class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  int _index = 0;
-  late final PageController _pageController = PageController();
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  static const _tabs = [
-    NavigationDestination(
-      icon: Icon(Icons.article_outlined),
-      selectedIcon: Icon(Icons.article),
-      label: 'Posts',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.storefront_outlined),
-      selectedIcon: Icon(Icons.storefront),
-      label: 'Products',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.widgets_outlined),
-      selectedIcon: Icon(Icons.widgets),
-      label: 'Widgets',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.bug_report_outlined),
-      selectedIcon: Icon(Icons.bug_report),
-      label: 'Issues',
-    ),
-  ];
-
-  static const _screens = [
-    PostsListScreen(),
-    ProductsPaginatedScreen(),
-    WidgetsShowcaseScreen(),
-    InefficiencyDemosScreen(),
-  ];
-
-  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: PageView(
-        controller: _pageController,
-        onPageChanged: (i) => setState(() => _index = i),
-        children: _screens,
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) {
-          setState(() => _index = i);
-          _pageController.jumpToPage(i);
-        },
-        destinations: _tabs,
-      ),
+    return ValueListenableBuilder<int>(
+      valueListenable: selectedSection,
+      builder: (context, index, _) => appSections[index].builder(context),
     );
   }
 }

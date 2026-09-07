@@ -19,4 +19,15 @@ extension QueryContextExtension on BuildContext {
   ) {
     return queryClient.get<T>(key, serializedParams);
   }
+
+  /// Read cached data by [key] and typed [params] — serializes [params]
+  /// internally so callers never hand-build the cache sub-key. Returns `null`
+  /// when nothing is cached.
+  ///
+  /// ```dart
+  /// final product = context.queryData<Product>('product', productId);
+  /// ```
+  T? queryData<T>(String key, [Object? params]) {
+    return queryClient.getData<T>(key, params);
+  }
 }

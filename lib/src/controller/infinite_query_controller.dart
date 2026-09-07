@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:collection';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_query_client/src/client/query_client.dart';
+import 'package:flutter_query_client/src/enums/cache_change_reason.dart';
 import 'package:flutter_query_client/src/enums/network_mode.dart';
 import 'package:flutter_query_client/src/enums/query_status.dart';
+import 'package:flutter_query_client/src/enums/refetch_on_app_focus.dart';
 import 'package:flutter_query_client/src/enums/refetch_on_mount.dart';
 import 'package:flutter_query_client/src/enums/refetch_on_reconnect.dart';
 import 'package:flutter_query_client/src/helpers.dart';
@@ -28,27 +28,42 @@ import 'package:flutter_query_client/src/utils/stale_listener_handle.dart';
 ///
 /// Subclasses must implement [queryFn] and [getNextPageParam].
 ///
+/// The loaded pages are stored in the [QueryClient] cache (as `List<List<T>>`)
+/// which is the single source of truth for data — the controller derives its
+/// flattened `state.data` from the cache and owns only the fetch lifecycle
+/// (`fetchStatus`, `isLoadingMore`, `error`). Like [QueryController], `enabled`
+/// is derived from [P]: always `true` for `void` filters, otherwise `true` only
+/// when filters are non-null.
+///
 /// [initialPageParam] and [limit] are optional — they fall back to
 /// [QueryDefaults.initialPageParam] (default `0`) and
-/// [QueryDefaults.limit] (default `20`) respectively, so they only need
-/// to be overridden when the controller differs from the global default.
+/// [QueryDefaults.limit] (default `20`) respectively.
 abstract class InfiniteQueryController<T, PageParam, P>
     extends Cubit<QueryState<List<T>>> {
   final String cacheKey;
   final QueryClient client = QueryClient.instance;
   final ErrorTransformer? _transformError;
 
-  final List<List<T>> _pages = [];
-  final List<PageParam> _pageParams = [];
   P? _filters;
+  final bool _isVoidParams;
   bool _isInitialized = false;
   int _filterVersion = 0;
 
   /// Whether initial execution has been done for [NetworkMode.offlineFirst].
   bool _offlineFirstExecuted = false;
 
-  /// Cached flat list — invalidated on page mutations to avoid repeated allocations.
-  List<T>? _flatCache;
+  /// Placeholder data carried across a [setParams] transition when
+  /// [keepPreviousData] is set — the previous filters' flattened data.
+  List<T>? _placeholderData;
+
+  /// Re-entrancy guard: true while this controller writes to the cache itself,
+  /// so its own cache-change callback is a no-op (it emits explicitly).
+  bool _isSelfMutating = false;
+
+  /// Memoized flattened view of the current cache pages, keyed by the pages
+  /// list identity (the cache replaces the whole entry on every mutation).
+  List<List<T>>? _flatMemoSource;
+  List<T>? _flatMemo;
 
   /// Stale-listener handle.
   late final StaleListenerHandle _staleHandle = StaleListenerHandle(
@@ -59,19 +74,175 @@ abstract class InfiniteQueryController<T, PageParam, P>
   /// Periodic refetch handle.
   final RefetchIntervalHandle _refetchHandle = RefetchIntervalHandle();
 
-  /// Stable callback reference for invalidation.
-  late final VoidCallback _onInvalidate = _handleInvalidation;
+  /// Stable cache-change callback reference.
+  late final void Function(CacheChangeReason) _onCacheChange =
+      _handleCacheChange;
 
   /// Stable reconnect callback reference.
   late final ReconnectCallback _onReconnect = _handleReconnect;
 
+  /// Stable app-lifecycle callbacks.
+  late final void Function() _onAppResume = _handleAppResume;
+  late final void Function() _onAppPause = _handleAppPause;
+
   InfiniteQueryController(this.cacheKey, {ErrorTransformer? transformError})
     : _transformError = transformError,
+      _isVoidParams = _checkVoid<P>(),
       super(const QueryState()) {
-    final params = _serializeFilters(_filters);
-    client.registerActiveQuery(cacheKey, params, onInvalidate: _onInvalidate);
+    client.registerActiveQuery(
+      cacheKey,
+      _serializeFilters(_filters),
+      onCacheChange: _onCacheChange,
+    );
     _registerConnectivity();
+    _registerLifecycle();
     _executeFirstPage();
+  }
+
+  /// Registers app foreground/background handling (once, in the constructor).
+  void _registerLifecycle() {
+    client.ensureLifecycleInitialized();
+    client.registerLifecycleCallbacks(
+      onResume: _onAppResume,
+      onPause: _onAppPause,
+    );
+  }
+
+  void _unregisterLifecycle() {
+    client.unregisterLifecycleCallbacks(
+      onResume: _onAppResume,
+      onPause: _onAppPause,
+    );
+  }
+
+  void _handleAppPause() {
+    if (isClosed) return;
+    if (!_resolvedRefetchIntervalInBackground) _refetchHandle.pause();
+  }
+
+  void _handleAppResume() {
+    if (isClosed || !enabled) return;
+    final intervalPastDue = _refetchHandle.isPastDue;
+    if (_refetchHandle.isPaused) _refetchHandle.resume();
+
+    if (state.isError) {
+      _executeFirstPage();
+      return;
+    }
+    final rof = _resolvedRefetchOnAppFocus;
+    final wantFocusRefetch = rof == RefetchOnAppFocus.always ||
+        (rof == RefetchOnAppFocus.ifStale && state.isStale);
+    if (intervalPastDue || wantFocusRefetch || !state.hasData) {
+      if (state.hasData) {
+        _refetchInternal();
+      } else {
+        _executeFirstPage();
+      }
+    }
+  }
+
+  static bool _checkVoid<X>() => null is X;
+
+  // ─── Cache-derived state ─────────────────────────────────────────
+
+  CachedQueryData<List<List<T>>>? get _cachedEntry =>
+      client.get<List<List<T>>>(cacheKey, _serializeFilters(_filters));
+
+  List<List<T>>? get _cachedPages => _cachedEntry?.data;
+
+  List<T> _flatten(List<List<T>> pages) {
+    if (identical(pages, _flatMemoSource) && _flatMemo != null) {
+      return _flatMemo!;
+    }
+    final flat = pages.expand((p) => p).toList();
+    _flatMemoSource = pages;
+    _flatMemo = flat;
+    return flat;
+  }
+
+  void _resetFlatMemo() {
+    _flatMemoSource = null;
+    _flatMemo = null;
+  }
+
+  /// Flattened items across all loaded pages (from the cache).
+  List<T> get _flatData {
+    final pages = _cachedPages;
+    if (pages == null) return const [];
+    return _flatten(pages);
+  }
+
+  /// `state` overlaid with the current cache data — synchronous reads always
+  /// reflect the cache. Placeholder states are left as-is.
+  @override
+  QueryState<List<T>> get state {
+    final base = super.state;
+    if (base.isPlaceholderData) return base;
+    final entry = _cachedEntry;
+    // Build a fresh QueryState rather than base.copyWith — the initial
+    // `const QueryState()` can be inferred as QueryState<Null>, whose copyWith
+    // would fail to cast non-null data.
+    return QueryState<List<T>>(
+      data: entry == null ? null : _flatten(entry.data),
+      error: base.error,
+      status: base.status,
+      fetchStatus: base.fetchStatus,
+      isStale: entry?.isStale ?? base.isStale,
+      isLoadingMore: base.isLoadingMore,
+      isPlaceholderData: base.isPlaceholderData,
+      params: _filters,
+    );
+  }
+
+  /// Emit a lifecycle state with `data`/`isStale`/`params` sourced from the
+  /// cache. Widget builders receive this emitted object, so data must be
+  /// populated here (not only via the [state] getter).
+  void _emitFromCache({
+    required QueryStatus status,
+    FetchStatus fetchStatus = FetchStatus.idle,
+    Object? error,
+  }) {
+    final entry = _cachedEntry;
+    _safeEmit(
+      QueryState<List<T>>(
+        status: status,
+        data: entry == null ? null : _flatten(entry.data),
+        isStale: entry?.isStale ?? false,
+        fetchStatus: fetchStatus,
+        error: error,
+        params: _filters,
+      ),
+    );
+  }
+
+  /// Persist [pages] to the cache under the current filters, with the
+  /// self-mutation guard raised so the resulting notification is suppressed.
+  void _savePages(List<List<T>> pages) {
+    _resetFlatMemo();
+    _isSelfMutating = true;
+    try {
+      client.set<List<List<T>>>(
+        cacheKey,
+        _serializeFilters(_filters),
+        CachedQueryData<List<List<T>>>(
+          data: pages,
+          fetchTime: DateTime.now(),
+          staleTime: _resolvedStaleTime,
+          gcTime: _resolvedGcTime,
+        ),
+      );
+    } finally {
+      _isSelfMutating = false;
+    }
+  }
+
+  void _selfMutate(void Function() fn) {
+    _isSelfMutating = true;
+    try {
+      fn();
+    } finally {
+      _isSelfMutating = false;
+    }
   }
 
   // ─── Safe emit ──────────────────────────────────────────────────
@@ -87,8 +258,6 @@ abstract class InfiniteQueryController<T, PageParam, P>
   ErrorTransformer? get transformError => _transformError;
 
   Object _applyTransformError(Object error) {
-    // A network-type failure asks the observer to confirm reachability (it
-    // won't flip offline on this alone). Server errors are left untouched.
     if (isNetworkError(error)) client.reportUnreachable();
     return applyErrorTransform(
       error: error,
@@ -103,11 +272,6 @@ abstract class InfiniteQueryController<T, PageParam, P>
   Future<List<T>> queryFn(PageParam pageParam, P? filters);
 
   /// The first page parameter passed to [queryFn] on the initial fetch.
-  ///
-  /// Defaults to [QueryDefaults.initialPageParam] (`0` unless overridden
-  /// globally). Override this in a subclass only when the controller uses a
-  /// different starting value — e.g. `1` for one-indexed APIs or `''` for
-  /// cursor-based APIs.
   PageParam get initialPageParam =>
       client.defaults.initialPageParam as PageParam;
 
@@ -115,17 +279,15 @@ abstract class InfiniteQueryController<T, PageParam, P>
   /// Return `null` to signal "no more pages."
   PageParam? getNextPageParam(List<T> lastPage, List<List<T>> allPages);
 
-  /// Whether this query should execute.
-  bool get enabled => true;
+  /// Whether this query should execute. Derived from [P] like [QueryController]:
+  /// always `true` for `void` filters, otherwise `true` when filters != null.
+  bool get enabled => _isVoidParams || _filters != null;
 
   /// Whether to background-refetch when mounting with cached data.
   RefetchOnMount get refetchOnMount => RefetchOnMount.always;
 
   /// Items per page — used as a convenience value in [queryFn] and
   /// [getNextPageParam].
-  ///
-  /// Defaults to [QueryDefaults.limit] (`20` unless overridden globally).
-  /// Override in a subclass to use a different page size for this controller.
   int get limit => client.defaults.limit;
 
   /// How long data is considered fresh.
@@ -146,9 +308,15 @@ abstract class InfiniteQueryController<T, PageParam, P>
   /// Controls whether this query refetches when network connectivity is restored.
   RefetchOnReconnect get refetchOnReconnect => RefetchOnReconnect.ifStale;
 
-  /// When true, keeps the previous data visible (with [QueryState.isPlaceholderData]
-  /// set to true) while fetching new data after a [setParams] call.
-  /// Similar to TanStack Query's `keepPreviousData` / `placeholderData`.
+  /// Controls whether this query refetches when the app returns to the
+  /// foreground. Defaults to [RefetchOnAppFocus.ifStale].
+  RefetchOnAppFocus get refetchOnAppFocus => RefetchOnAppFocus.ifStale;
+
+  /// Whether [refetchInterval] keeps polling while the app is backgrounded.
+  bool get refetchIntervalInBackground => false;
+
+  /// When true, keeps the previous filters' data visible (with
+  /// [QueryState.isPlaceholderData] set) while fetching after a [setParams] call.
   bool get keepPreviousData => false;
 
   // ─── Lifecycle hooks (override to customize) ─────────────────────
@@ -173,10 +341,15 @@ abstract class InfiniteQueryController<T, PageParam, P>
       client.defaults.networkMode ?? networkMode;
   RefetchOnReconnect get _resolvedRefetchOnReconnect =>
       client.defaults.refetchOnReconnect ?? refetchOnReconnect;
+  RefetchOnAppFocus get _resolvedRefetchOnAppFocus =>
+      client.defaults.refetchOnAppFocus ?? refetchOnAppFocus;
+  bool get _resolvedRefetchIntervalInBackground =>
+      client.defaults.refetchIntervalInBackground ?? refetchIntervalInBackground;
+  bool get _resolvedKeepPreviousData =>
+      client.defaults.keepPreviousData ?? keepPreviousData;
 
   // ─── Network helpers ────────────────────────────────────────────
 
-  /// Whether the controller should block fetching due to network state.
   bool get _shouldPause {
     final mode = _resolvedNetworkMode;
     if (mode == NetworkMode.always) return false;
@@ -189,7 +362,6 @@ abstract class InfiniteQueryController<T, PageParam, P>
   void _registerConnectivity() {
     final mode = _resolvedNetworkMode;
     if (mode == NetworkMode.always) return;
-    // Fire-and-forget — errors are handled internally.
     client.ensureConnectivityInitialized().ignore();
     client.registerReconnectCallback(
       cacheKey,
@@ -214,7 +386,6 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
     if (_refetchHandle.isPaused) _refetchHandle.resume();
 
-    // Always refetch if in error state — the failure was likely network-related.
     if (state.isError) {
       QueryLogger.info('[$cacheKey] Retrying after error (reconnect)');
       _executeFirstPage();
@@ -243,25 +414,11 @@ abstract class InfiniteQueryController<T, PageParam, P>
     }
   }
 
-  // ─── Internal helpers ────────────────────────────────────────────
-
-  List<T> get _flatData => _flatCache ??= _pages.expand((p) => p).toList();
-
-  void _invalidateFlat() => _flatCache = null;
-
-  int _flatIndexOf(int pageIndex, int itemIndex) {
-    var offset = 0;
-    for (var i = 0; i < pageIndex; i++) {
-      offset += _pages[i].length;
-    }
-    return offset + itemIndex;
-  }
-
   // ─── Filters ─────────────────────────────────────────────────────
 
   P? get filters => _filters;
 
-  /// Update filters, reset pagination, and re-fetch from initial page.
+  /// Update filters, reset pagination, and re-fetch from the initial page.
   void setParams(P params) {
     final oldSerialized = _serializeFilters(_filters);
     final newSerialized = serializeParams(params);
@@ -269,53 +426,49 @@ abstract class InfiniteQueryController<T, PageParam, P>
         _isInitialized && oldSerialized != newSerialized;
 
     if (filtersChanged) {
-      // Capture previous data before clearing for keepPreviousData.
-      final previousData =
-          keepPreviousData && _pages.isNotEmpty
-              ? List<T>.from(_flatData)
-              : null;
-
-      _saveToCache();
+      // Capture the previous filters' data for keepPreviousData.
+      _placeholderData = (_resolvedKeepPreviousData && _flatData.isNotEmpty)
+          ? List<T>.of(_flatData)
+          : null;
 
       _unregisterConnectivity();
       client.unregisterActiveQuery(
         cacheKey,
         oldSerialized,
-        onInvalidate: _onInvalidate,
+        onCacheChange: _onCacheChange,
       );
 
-      _resetPagination();
       _filterVersion++;
       _filters = params;
+      _resetFlatMemo();
 
       client.registerActiveQuery(
         cacheKey,
         _serializeFilters(_filters),
-        onInvalidate: _onInvalidate,
+        onCacheChange: _onCacheChange,
       );
       _registerConnectivity();
 
-      if (_restoreFromCache(params)) {
-        _safeEmit(
-          QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
-        );
+      if (_cachedPages != null) {
+        _emitFromCache(status: QueryStatus.success);
         _registerStaleListener();
         _startRefetchInterval();
         return;
       }
 
-      // Emit placeholder data or reset to idle so _executeFirstPage
-      // doesn't short-circuit on state.isLoading from a previous call.
-      if (previousData != null && previousData.isNotEmpty) {
+      // Emit placeholder data or reset to idle so _executeFirstPage doesn't
+      // short-circuit on a stale loading state from the previous filters.
+      if (_placeholderData != null && _placeholderData!.isNotEmpty) {
         _safeEmit(
           QueryState<List<T>>(
             status: QueryStatus.success,
-            data: previousData,
+            data: _placeholderData,
             isPlaceholderData: true,
+            params: _filters,
           ),
         );
       } else {
-        _safeEmit(const QueryState());
+        _safeEmit(QueryState<List<T>>(params: _filters));
       }
     } else {
       _filters = params;
@@ -324,63 +477,35 @@ abstract class InfiniteQueryController<T, PageParam, P>
     _executeFirstPage();
   }
 
-  // ─── Invalidation callback ───────────────────────────────────────
+  // ─── Cache-change callback ───────────────────────────────────────
 
-  void _handleInvalidation() {
-    if (!isClosed) refetch();
+  void _handleCacheChange(CacheChangeReason reason) {
+    if (isClosed || _isSelfMutating) return;
+
+    switch (reason) {
+      case CacheChangeReason.updated:
+      case CacheChangeReason.statusChanged:
+        if (_cachedPages != null && !state.isLoading) {
+          _emitFromCache(status: QueryStatus.success);
+        }
+      case CacheChangeReason.invalidated:
+        if (enabled) {
+          refetch();
+        } else {
+          _emitFromCache(status: QueryStatus.idle);
+        }
+      case CacheChangeReason.cleared:
+      case CacheChangeReason.evicted:
+        _placeholderData = null;
+        _resetFlatMemo();
+        _staleHandle.unregister();
+        _safeEmit(QueryState<List<T>>(status: QueryStatus.idle, params: _filters));
+    }
   }
 
   // ─── Cache helpers ───────────────────────────────────────────────
 
-  String? _serializeFilters([P? filters]) {
-    return serializeParams(filters);
-  }
-
-  void _saveToCache() {
-    if (_pages.isEmpty) return;
-    client.set<List<List<T>>>(
-      cacheKey,
-      _serializeFilters(_filters),
-      CachedQueryData<List<List<T>>>(
-        data: _pages.map((p) => UnmodifiableListView<T>(p)).toList(),
-        fetchTime: DateTime.now(),
-        staleTime: _resolvedStaleTime,
-        gcTime: _resolvedGcTime,
-      ),
-    );
-  }
-
-  bool _restoreFromCache(P? filters) {
-    final params = _serializeFilters(filters);
-    final cached = client.get<List<List<T>>>(cacheKey, params);
-    if (cached != null && cached.isValid) {
-      _pages.clear();
-      _pageParams.clear();
-      for (var i = 0; i < cached.data.length; i++) {
-        _pages.add(List<T>.of(cached.data[i]));
-        if (i == 0) {
-          _pageParams.add(initialPageParam);
-        } else {
-          final nextParam = getNextPageParam(
-            _pages[i - 1],
-            _pages.sublist(0, i),
-          );
-          if (nextParam != null) {
-            _pageParams.add(nextParam);
-          }
-        }
-      }
-      _invalidateFlat();
-      return true;
-    }
-    return false;
-  }
-
-  void _resetPagination() {
-    _pages.clear();
-    _pageParams.clear();
-    _invalidateFlat();
-  }
+  String? _serializeFilters([P? filters]) => serializeParams(filters);
 
   // ─── First page execution ───────────────────────────────────────
 
@@ -389,35 +514,26 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
     _isInitialized = true;
 
-    if (_pages.isEmpty && _restoreFromCache(_filters)) {
-      final capturedVersionCache = _filterVersion;
+    // Cache already holds pages for these filters — emit and maybe refetch.
+    if (_cachedPages != null) {
+      final capturedVersion = _filterVersion;
       await Future.delayed(Duration.zero);
-      if (capturedVersionCache != _filterVersion) return;
-      final cached = client.get<List<List<T>>>(
-        cacheKey,
-        _serializeFilters(_filters),
-      );
-      _safeEmit(
-        QueryState<List<T>>(
-          status: QueryStatus.success,
-          data: _flatData,
-          isStale: cached?.isStale ?? false,
-        ),
-      );
+      if (capturedVersion != _filterVersion) return;
+      final entry = _cachedEntry;
+      _emitFromCache(status: QueryStatus.success);
       _registerStaleListener();
       _startRefetchInterval();
       final rom = _resolvedRefetchOnMount;
+      final isStale = entry?.isStale ?? false;
       if (rom == RefetchOnMount.always ||
-          (rom == RefetchOnMount.stale && (cached?.isStale ?? false))) {
+          (rom == RefetchOnMount.stale && isStale)) {
         _refetchInternal();
       }
       return;
     }
 
-    if (_pages.isNotEmpty) return;
     if (state.isLoading || state.isLoadingMore) return;
 
-    // Check network before fetching.
     if (_shouldPause) {
       final capturedVersionPause = _filterVersion;
       await Future.delayed(Duration.zero);
@@ -429,16 +545,11 @@ abstract class InfiniteQueryController<T, PageParam, P>
     final capturedVersion = _filterVersion;
 
     await Future.delayed(Duration.zero);
-
-    // A concurrent setParams() call may have already restored state from
-    // cache for the new filters — bail out before emitting loading so we
-    // don't clobber it with this stale call's state.
     if (capturedVersion != _filterVersion) return;
 
-    // keepPreviousData: if setParams already placed placeholder data, keep it
-    // visible instead of flashing a loading spinner.
+    // keepPreviousData: keep placeholder visible instead of a loading spinner.
     if (!state.isPlaceholderData) {
-      _safeEmit(const QueryState(status: QueryStatus.loading));
+      _emitFromCache(status: QueryStatus.loading);
     }
 
     try {
@@ -455,92 +566,51 @@ abstract class InfiniteQueryController<T, PageParam, P>
         _offlineFirstExecuted = true;
       }
 
-      _pages.add(pageData);
-      _pageParams.add(initialPageParam);
-      _invalidateFlat();
-      _saveToCache();
+      _placeholderData = null;
+      _savePages(<List<T>>[pageData]);
       _registerStaleListener();
       _startRefetchInterval();
 
       client.reportReachable();
-      _safeEmit(
-        QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
-      );
+      _emitFromCache(status: QueryStatus.success);
       onSuccess(_flatData);
     } catch (e) {
       if (capturedVersion != _filterVersion) return;
       final transformed = _applyTransformError(e);
-      _safeEmit(QueryState<List<T>>(
-        status: QueryStatus.error,
-        error: transformed,
-        data: state.data,
-      ));
+      _emitFromCache(status: QueryStatus.error, error: transformed);
       onQueryError(transformed);
     }
   }
 
   // ─── Remount (hidden → visible) ───────────────────────────────────
 
-  /// Called by the provider when the widget transitions from hidden → visible
-  /// (e.g. switching tabs in an `IndexedStack` or toggling `Visibility`).
+  /// Called by the provider when the widget transitions from hidden → visible.
   ///
-  /// **Note:** Has no effect when the provider is placed at the root level
-  /// (e.g. in `MultiQueryProvider` at the app root) because the widget never
-  /// unmounts or becomes hidden — so `refetchOnMount` will never trigger.
-  /// Use `updateItem`, `refetch`, or `invalidateAndRefresh` to push updates
-  /// to a root-level controller from child screens.
+  /// **Note:** Has no effect at the root level (the widget never unmounts).
+  /// Use `updateItem`, `refetch`, or `invalidateAndRefresh` to push updates to
+  /// a root-level controller from child screens.
   void handleRemount() {
     if (!enabled) return;
     if (state.isLoading || state.isRefetching || state.isLoadingMore) return;
 
-    // Always retry if in error state — the network issue may have resolved.
     if (state.isError) {
       QueryLogger.info('[$cacheKey] Retrying after error (remount, infinite)');
-      _resetPagination();
       _executeFirstPage();
       return;
     }
 
-    final params = _serializeFilters(_filters);
-    final cached = client.get<List<List<T>>>(cacheKey, params);
+    final entry = _cachedEntry;
+    if (entry == null) return;
 
-    if (cached == null) return;
-
-    final cachedTotalLength = cached.data.fold<int>(
-      0,
-      (sum, p) => sum + p.length,
-    );
-    if (_flatData.length != cachedTotalLength ||
-        !identical(_flatData, state.data)) {
-      _pages.clear();
-      _pageParams.clear();
-      for (var i = 0; i < cached.data.length; i++) {
-        _pages.add(List<T>.of(cached.data[i]));
-        if (i == 0) {
-          _pageParams.add(initialPageParam);
-        } else {
-          final nextParam = getNextPageParam(
-            _pages[i - 1],
-            _pages.sublist(0, i),
-          );
-          if (nextParam != null) _pageParams.add(nextParam);
-        }
-      }
-      _invalidateFlat();
-      _safeEmit(
-        QueryState<List<T>>(
-          status: QueryStatus.success,
-          data: _flatData,
-          isStale: cached.isStale,
-        ),
-      );
-    }
+    // External writes while hidden already notified via the subscription; this
+    // ensures a fresh frame on show.
+    _emitFromCache(status: QueryStatus.success);
 
     _startRefetchInterval();
 
     final rom = _resolvedRefetchOnMount;
     if (rom == RefetchOnMount.always ||
-        (rom == RefetchOnMount.stale && cached.isStale)) {
+        (rom == RefetchOnMount.stale && entry.isStale)) {
       _refetchInternal();
     }
   }
@@ -548,18 +618,15 @@ abstract class InfiniteQueryController<T, PageParam, P>
   // ─── Load more ───────────────────────────────────────────────────
 
   /// Fetch the next page of data.
-  ///
-  /// Returns early if the device is offline and [networkMode] requires
-  /// connectivity. User-triggered action — fails fast rather than queuing.
   Future<void> loadMore() async {
     if (!enabled) return;
-    if (_pages.isEmpty) return;
+    final pages = _cachedPages;
+    if (pages == null || pages.isEmpty) return;
 
-    final nextParam = getNextPageParam(_pages.last, _pages);
+    final nextParam = getNextPageParam(pages.last, pages);
     if (nextParam == null) return;
     if (state.isLoading || state.isLoadingMore) return;
 
-    // Fail fast if offline and network is required.
     if (_shouldPause) return;
 
     final capturedVersion = _filterVersion;
@@ -576,17 +643,14 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
       if (capturedVersion != _filterVersion) return;
 
-      _pages.add(pageData);
-      _pageParams.add(nextParam);
-      _invalidateFlat();
-      _saveToCache();
+      // Re-read in case the cache changed while awaiting.
+      final basePages = _cachedPages ?? pages;
+      _savePages(<List<T>>[...basePages, pageData]);
       _registerStaleListener();
       _startRefetchInterval();
 
       client.reportReachable();
-      _safeEmit(
-        QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
-      );
+      _emitFromCache(status: QueryStatus.success);
       onSuccess(_flatData);
     } catch (e) {
       if (capturedVersion != _filterVersion) return;
@@ -602,14 +666,13 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
   // ─── Refetch ─────────────────────────────────────────────────────
 
-  /// Refetch from initial page.
+  /// Refetch all currently-loaded pages (TanStack parity), preserving depth.
   Future<void> refetch() async {
     if (!enabled) return;
     await _refetchInternal();
   }
 
   Future<void> _refetchInternal() async {
-    // Check network before refetching.
     if (_shouldPause) {
       _safeEmit(state.copyWith(fetchStatus: FetchStatus.paused));
       _refetchHandle.pause();
@@ -617,43 +680,40 @@ abstract class InfiniteQueryController<T, PageParam, P>
     }
 
     final capturedVersion = _filterVersion;
+    // Replay as many pages as were loaded (at least one).
+    final targetPageCount = (_cachedPages?.length ?? 0).clamp(1, 1 << 30);
+
     _safeEmit(state.copyWith(fetchStatus: FetchStatus.refetching));
 
     try {
-      final pageData = await retryWithBackoff<List<T>>(
-        fn: () => queryFn(initialPageParam, _filters),
-        maxAttempts: _resolvedRetryCount,
-        baseDelay: _resolvedRetryDelay,
-        shouldAbort: () => _shouldPause,
-      );
+      final newPages = <List<T>>[];
+      PageParam param = initialPageParam;
+      for (var i = 0; i < targetPageCount; i++) {
+        final page = await retryWithBackoff<List<T>>(
+          fn: () => queryFn(param, _filters),
+          maxAttempts: _resolvedRetryCount,
+          baseDelay: _resolvedRetryDelay,
+          shouldAbort: () => _shouldPause,
+        );
+        if (capturedVersion != _filterVersion) return;
+        newPages.add(page);
+        // Derive the next param from the freshly fetched page, like TanStack.
+        final next = getNextPageParam(page, newPages);
+        if (next == null) break; // no more pages available now
+        param = next;
+      }
 
-      if (capturedVersion != _filterVersion) return;
-
-      _pages.clear();
-      _pageParams.clear();
-      _pages.add(pageData);
-      _pageParams.add(initialPageParam);
-      _invalidateFlat();
-      _saveToCache();
+      _savePages(newPages);
       _registerStaleListener();
       _startRefetchInterval();
 
       client.reportReachable();
-      _safeEmit(
-        QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
-      );
+      _emitFromCache(status: QueryStatus.success);
       onSuccess(_flatData);
     } catch (e) {
       if (capturedVersion != _filterVersion) return;
       final transformed = _applyTransformError(e);
-      _safeEmit(
-        state.copyWith(
-          status: QueryStatus.error,
-          error: transformed,
-          fetchStatus: FetchStatus.idle,
-          isPlaceholderData: false,
-        ),
-      );
+      _emitFromCache(status: QueryStatus.error, error: transformed);
       onQueryError(transformed);
     }
   }
@@ -661,86 +721,114 @@ abstract class InfiniteQueryController<T, PageParam, P>
   // ─── Invalidate & refresh ────────────────────────────────────────
 
   Future<void> invalidateAndRefresh() async {
-    client.invalidate(cacheKey, _serializeFilters(_filters));
-    reset();
+    // Guard so the resulting cache-change callback doesn't also refetch.
+    _selfMutate(() => client.invalidate(cacheKey, _serializeFilters(_filters)));
+    _resetFlatMemo();
+    _safeEmit(QueryState<List<T>>(params: _filters));
     await _executeFirstPage();
   }
 
-  /// Reset pagination state to initial.
+  /// Reset pagination state to initial (clears the cached pages).
   void reset() {
-    _pages.clear();
-    _pageParams.clear();
-    _invalidateFlat();
-    _safeEmit(const QueryState());
+    _selfMutate(() => client.invalidate(cacheKey, _serializeFilters(_filters)));
+    _resetFlatMemo();
+    _safeEmit(QueryState<List<T>>(params: _filters));
   }
 
   // ─── Optimistic updates ──────────────────────────────────────────
 
   void updateItem(bool Function(T item) predicate, T updatedItem) {
-    for (var i = 0; i < _pages.length; i++) {
-      final idx = _pages[i].indexWhere(predicate);
+    final pages = _cachedPages;
+    if (pages == null) return;
+    for (var i = 0; i < pages.length; i++) {
+      final idx = pages[i].indexWhere(predicate);
       if (idx != -1) {
-        _pages[i][idx] = updatedItem;
-        // Copy _flatCache BEFORE mutating — state.data still references
-        // the old list, so DeepCollectionEquality sees the difference.
-        // Single-pass List.of avoids the expand-from-pages iterator overhead.
-        if (_flatCache != null) {
-          _flatCache = List<T>.of(_flatCache!);
-          final flatIdx = _flatIndexOf(i, idx);
-          if (flatIdx != -1) _flatCache![flatIdx] = updatedItem;
-        }
-        _safeEmit(
-          QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
-        );
+        final newPages = pages.map((p) => List<T>.of(p)).toList();
+        newPages[i][idx] = updatedItem;
+        _savePages(newPages);
+        _emitFromCache(status: QueryStatus.success);
         return;
       }
     }
   }
 
   void removeItem(bool Function(T item) predicate) {
-    for (final page in _pages) {
-      page.removeWhere(predicate);
-    }
-    _invalidateFlat();
-    _safeEmit(
-      QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
-    );
+    final pages = _cachedPages;
+    if (pages == null) return;
+    final newPages =
+        pages.map((p) => List<T>.of(p)..removeWhere(predicate)).toList();
+    _savePages(newPages);
+    _emitFromCache(status: QueryStatus.success);
   }
 
   void prependItem(T item) {
-    if (_pages.isEmpty) {
-      _pages.add([item]);
-      _pageParams.add(initialPageParam);
+    final pages = _cachedPages;
+    if (pages == null || pages.isEmpty) {
+      _savePages(<List<T>>[<T>[item]]);
     } else {
-      _pages.first.insert(0, item);
+      final newPages = pages.map((p) => List<T>.of(p)).toList();
+      newPages.first.insert(0, item);
+      _savePages(newPages);
     }
-    // Build a new list so state.data (old reference) differs.
-    _flatCache = _flatCache != null ? [item, ..._flatCache!] : null;
-    _safeEmit(
-      QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
-    );
+    _emitFromCache(status: QueryStatus.success);
   }
 
   void appendItem(T item) {
-    if (_pages.isEmpty) {
-      _pages.add([item]);
-      _pageParams.add(initialPageParam);
+    final pages = _cachedPages;
+    if (pages == null || pages.isEmpty) {
+      _savePages(<List<T>>[<T>[item]]);
     } else {
-      _pages.last.add(item);
+      final newPages = pages.map((p) => List<T>.of(p)).toList();
+      newPages.last.add(item);
+      _savePages(newPages);
     }
-    // Build a new list so state.data (old reference) differs.
-    _flatCache = _flatCache != null ? [..._flatCache!, item] : null;
-    _safeEmit(
-      QueryState<List<T>>(status: QueryStatus.success, data: _flatData),
+    _emitFromCache(status: QueryStatus.success);
+  }
+
+  // ─── Param-scoped access ─────────────────────────────────────────
+
+  /// Synchronously read the flattened cached data for the given [filters]
+  /// (defaults to current filters), from the [QueryClient] cache.
+  List<T>? dataFor([P? filters]) {
+    final serialized =
+        filters != null ? serializeParams(filters) : _serializeFilters(_filters);
+    final pages = client.get<List<List<T>>>(cacheKey, serialized)?.data;
+    return pages?.expand((p) => p).toList();
+  }
+
+  /// Fetch and cache the first page for arbitrary [filters] without disturbing
+  /// this controller's current filters or emitted state.
+  Future<List<T>> fetchFor(P filters) async {
+    final serialized = serializeParams(filters);
+    final existing = client.get<List<List<T>>>(cacheKey, serialized);
+    if (existing != null && !existing.isStale) {
+      return existing.data.expand((p) => p).toList();
+    }
+    final page = await retryWithBackoff<List<T>>(
+      fn: () => queryFn(initialPageParam, filters),
+      maxAttempts: _resolvedRetryCount,
+      baseDelay: _resolvedRetryDelay,
+      shouldAbort: () => _shouldPause,
     );
+    client.set<List<List<T>>>(
+      cacheKey,
+      serialized,
+      CachedQueryData<List<List<T>>>(
+        data: <List<T>>[page],
+        fetchTime: DateTime.now(),
+        staleTime: _resolvedStaleTime,
+        gcTime: _resolvedGcTime,
+      ),
+    );
+    client.reportReachable();
+    return page;
   }
 
   // ─── Stale listener management ───────────────────────────────────
 
   void _registerStaleListener() {
     if (isClosed || _resolvedStaleTime == null) return;
-    final params = _serializeFilters(_filters);
-    _staleHandle.register(params, () {
+    _staleHandle.register(_serializeFilters(_filters), () {
       if (!isClosed) {
         _safeEmit(state.copyWith(isStale: true));
       }
@@ -763,12 +851,13 @@ abstract class InfiniteQueryController<T, PageParam, P>
 
   /// Whether more pages can be loaded.
   bool get hasMore {
-    if (_pages.isEmpty) return true;
-    return getNextPageParam(_pages.last, _pages) != null;
+    final pages = _cachedPages;
+    if (pages == null || pages.isEmpty) return true;
+    return getNextPageParam(pages.last, pages) != null;
   }
 
   /// Number of pages loaded.
-  int get currentPage => _pages.length;
+  int get currentPage => _cachedPages?.length ?? 0;
 
   /// Total number of items across all pages.
   int get totalItems => _flatData.length;
@@ -776,10 +865,11 @@ abstract class InfiniteQueryController<T, PageParam, P>
   @override
   Future<void> close() {
     _unregisterConnectivity();
+    _unregisterLifecycle();
     client.unregisterActiveQuery(
       cacheKey,
       _serializeFilters(_filters),
-      onInvalidate: _onInvalidate,
+      onCacheChange: _onCacheChange,
     );
     _staleHandle.unregister();
     _refetchHandle.stop();

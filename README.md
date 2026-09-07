@@ -15,6 +15,7 @@ Handles **fetching, caching, synchronizing, and updating** server state with min
 - **Configurable stale time & garbage collection** — control cache lifetime precisely
 - **Automatic retry with exponential backoff** — resilient to transient failures
 - **Network-aware fetching** — pauses when offline, resumes on reconnect
+- **Refetch-on-visible** — screens automatically refetch when you return to them (tab switch **and** `Navigator` push/pop), driven by the builder widgets — see [Refetch on Visible](#refetch-on-visible-navigation)
 - **`keepPreviousData`** — show old results while fetching new ones after `setParams()`
 - **Global defaults** with per-controller overrides
 - **BLoC-based state** — integrates naturally with `flutter_bloc`; observe all controllers via `QueryObserver` set in `QueryClientProvider`
@@ -26,7 +27,7 @@ Handles **fetching, caching, synchronizing, and updating** server state with min
 
 ```yaml
 dependencies:
-  flutter_query_client: ^2.0.2
+  flutter_query_client: ^4.0.0
 ```
 
 ---
@@ -786,6 +787,68 @@ class PostsController extends QueryController<List<Post>, void> {
 
 ---
 
+## Refetch on Visible (navigation)
+
+A query refetches automatically when its screen becomes **visible again** — so
+returning to a screen shows fresh data — matching TanStack Query's mount/focus
+behaviour. Because Flutter (unlike React) keeps screens *mounted* when they're
+covered or tabbed away, this is driven from the **rendering widgets**
+(`QueryBuilder` / `QueryConsumer` / `QuerySelector` and their infinite/multi
+variants), not the provider. That means it works even when the controller is
+provided at the app root, and it composes across multiple screens.
+
+Two visibility signals are detected, covering the full range of navigation:
+
+| You do this | Detected via |
+|---|---|
+| Switch a bottom-nav tab / `IndexedStack` / GoRouter `StatefulShellRoute` branch and return | `TickerMode` flip (built in — nothing to wire) |
+| Push a page over a screen, then pop back | `QueryNavigatorObserver` (you install it — see below) |
+
+Whether a refetch actually runs follows the controller's `refetchOnMount`
+(`always` / `stale` / `never`). Dismissing a **dialog** or bottom sheet does
+**not** count as a screen re-entry.
+
+### Enable push/pop detection
+
+Add `QueryNavigatorObserver` to your navigator's `observers`. A
+`NavigatorObserver` belongs to a single Navigator, so use the shared instance
+for one `MaterialApp`, and a fresh instance per navigator for a GoRouter
+`StatefulShellRoute`:
+
+```dart
+// Plain MaterialApp — one navigator:
+MaterialApp(
+  navigatorObservers: [QueryNavigatorObserver.instance],
+  home: const HomeScreen(),
+);
+
+// GoRouter with a StatefulShellRoute — root + one per branch:
+GoRouter(
+  observers: [QueryNavigatorObserver()],
+  routes: [
+    StatefulShellRoute.indexedStack(
+      builder: (context, state, shell) => ScaffoldWithNavBar(shell),
+      branches: [
+        StatefulShellBranch(observers: [QueryNavigatorObserver()], routes: [...]),
+        StatefulShellBranch(observers: [QueryNavigatorObserver()], routes: [...]),
+      ],
+    ),
+  ],
+);
+```
+
+Tab switching works without the observer (it uses `TickerMode`); the observer is
+only needed for `Navigator` push/pop. Render your query with a `Query*` widget
+(not a raw `BlocBuilder`) so the visibility is detected.
+
+> **Note:** refetch-on-visible triggers a network **refetch**. To instead have a
+> screen reflect cache changes made elsewhere *without* a refetch, have it read
+> the **same query key** (its `QueryBuilder` updates live via the cache), or
+> `invalidateQueries([...])` after a mutation. Two *different* query keys never
+> sync automatically.
+
+---
+
 ## Logging
 
 ```dart
@@ -805,5 +868,6 @@ A full example app demonstrating all features is in the [`example/`](example/) d
 
 - **Posts tab** — `QueryController`, `QueryBuilder`, `MutationController<T, P>` typed params, `QueryClient.instance.update` cache patching from mutation listeners, background polling, offline support
 - **Products tab** — `InfiniteQueryController`, `setParams()` live search, `loadMore()` on scroll, `keepPreviousData`, `updateInfiniteQuery` + `prependItem` after create, optimistic item removal
+- **Navigation Refetch tab** — a self-contained GoRouter app (bottom nav + `StatefulShellRoute` with three kept-alive tabs and nested routes) demonstrating refetch-on-visible: tab-switch refetch, nested push→pop refetch, interval polling, manual refetch, and a root-provided controller that still refetches from a builder deep in the tree
 - **Widgets tab** — live showcase of every widget: `MultiQueryProvider`, `QueryConsumer`, `QuerySelector`, `InfiniteQueryListener`, `InfiniteQueryConsumer`, `InfiniteQuerySelector`, `MultiQueryListener`, `QueryObserver`, error handling with `transformError`, and using mutation controllers with all Query\* widgets
 - **Issues tab** — interactive before/after benchmarks for all v2.0.0 performance and memory optimizations; detailed documentation in [`example/lib/features/inefficiency_demos/OPTIMIZATIONS.md`](example/lib/features/inefficiency_demos/OPTIMIZATIONS.md)

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
+import '../../app_navigation.dart';
 import '../../shared.dart';
 import 'product_controllers.dart';
 import 'product_model.dart';
@@ -215,6 +216,7 @@ class _ProductsViewState extends State<_ProductsView> {
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
+      drawer: const AppDrawer(),
       appBar: AppBar(
         title: const Text('Products'),
         bottom: PreferredSize(

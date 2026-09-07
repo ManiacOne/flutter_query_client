@@ -1,3 +1,188 @@
+## 4.0.0
+
+### Universal refetch-on-visible across all navigation (no per-package hacks)
+
+Refetch-on-visible now works for **every** navigation pattern from **two universal,
+navigation-package-agnostic signals** — no `active` flag to wire up, no GoRouter-specific
+code — resolving the gap where returning to a screen via `Navigator` push→pop (and nested
+paths) never refetched.
+
+* **Detection moved from the providers to the rendering widgets** (`QueryBuilder`,
+  `QueryConsumer`, `QuerySelector`, `QueriesBuilder`, `InfiniteQueryBuilder`,
+  `InfiniteQueryConsumer`, `InfiniteQuerySelector`, `InfiniteQueriesBuilder`). Visibility is a
+  property of the widget that *renders* the query, not of the provider — which may sit at a
+  global/root level and never become invisible. Each rendering widget now detects its own
+  visibility and calls `handleRemount()`, so refetch-on-visible works even when the controller
+  is provided globally, and composes across multiple consumption sites (`handleRemount` dedups
+  concurrent refetches). This is the **breaking change**: if you render a query with a raw
+  `BlocBuilder` instead of a `Query*` widget, switch to the matching `Query*` widget to keep
+  auto-refetch.
+
+* **New: `QueryNavigatorObserver`** — a `NavigatorObserver` you add to your navigator's
+  `observers`. Returning from a pushed route (plain `Navigator`, GoRouter, `auto_route`,
+  Navigator 2.0 — they all drive the same `Route` machinery) refetches the revealed screen per
+  its `refetchOnMount` policy. A covered route keeps ticking, so `TickerMode` cannot see
+  push/pop — a `NavigatorObserver` is the only universal signal for it. **Create one per
+  navigator** (a `NavigatorObserver` belongs to a single Navigator): the shared `.instance` for
+  a single `MaterialApp`, and a fresh instance for the root and each branch of a
+  `StatefulShellRoute`. All instances feed one shared route-keyed registry, so widgets register
+  once.
+
+  ```dart
+  // Plain MaterialApp — one navigator:
+  MaterialApp(navigatorObservers: [QueryNavigatorObserver.instance], home: HomeScreen());
+
+  // GoRouter StatefulShellRoute — fresh instance per navigator:
+  GoRouter(observers: [QueryNavigatorObserver()], routes: [
+    StatefulShellRoute.indexedStack(branches: [
+      StatefulShellBranch(observers: [QueryNavigatorObserver()], routes: [...]),
+      StatefulShellBranch(observers: [QueryNavigatorObserver()], routes: [...]),
+    ], builder: ...),
+  ]);
+  ```
+
+* **Only full-screen `PageRoute`s count.** Dismissing a **dialog**, bottom sheet, or popup
+  menu (all `PopupRoute`s) does **not** refetch — dismissing a dialog is not a screen re-entry.
+* **`TickerMode`/`Visibility` detection is unchanged** — tab/branch switches (GoRouter
+  `StatefulShellRoute`, `IndexedStack`) keep working. The two signals compose: whichever fires
+  first triggers the remount.
+* **Providers are now pure lifecycle owners** (create + close the controller); they no longer
+  do remount detection.
+* **All visibility detection lives in one file** — `lib/src/visibility/refetch_visibility.dart`
+  (registry + observer + detector mixin + the builder scope), with a full "how it works" doc.
+* **Removed `RefetchOnVisible`.** The `Query*` builder widgets now detect visibility
+  automatically (both signals), so the manual `active:`-flag widget is redundant. If you were
+  rendering a query with a raw `BlocBuilder`, switch to the matching `Query*` widget.
+* **Upgrading from 3.0.0:** add `QueryNavigatorObserver.instance` to your navigator
+  `observers` (or a fresh `QueryNavigatorObserver()` per navigator for GoRouter
+  `StatefulShellRoute`) to opt into push/pop refetch, and render queries with the `Query*`
+  widgets (not raw `BlocBuilder`) so they detect visibility. Dialog-dismiss does not refetch.
+
+> **Note on versioning:** 4.0.0 is the first release published since **3.0.0**. Versions
+> 3.1.0–3.4.0 (below) were developed but **never published to pub.dev**; their features ship
+> as part of 4.0.0. The entries are kept below for a complete history.
+
+---
+
+## 3.4.0
+
+### Refetch-on-visible for screens that never unmount
+
+* **`QueriesProvider` and `InfiniteQueriesProvider` now do remount detection** like `QueryProvider` /
+  `InfiniteQueryProvider` — they call the controller's `handleRemount()` when their subtree's
+  `TickerMode` flips back on. Since GoRouter's `StatefulShellRoute.indexedStack` wraps branches in
+  `TickerMode(enabled: isActive)`, **returning to a kept-alive branch refetches automatically**
+  (per `refetchOnMount`), with no extra widget. This is the recommended approach.
+* **New: `handleRemount()` on `QueriesController` and `InfiniteQueriesController`** (it already existed
+  on `QueryController` / `InfiniteQueryController`), refetching per the `refetchOnMount` policy
+  (`always` / `stale` / `never`).
+* **New: `RefetchOnVisible` widget** — the escape hatch for navigation that does **not** toggle
+  `TickerMode` (a raw Flutter `IndexedStack`, a custom container): `RefetchOnVisible(active: …,
+  onVisible: () => context.query<C>().handleRemount(), child: …)` fires `onVisible` on the
+  hidden→visible edge using an `active` flag you supply. Refetch-on-mount itself is unchanged.
+* Example: `example/lib/gorouter_example.dart` — a standalone `StatefulShellRoute` app showing the
+  provider-level auto-refetch (run with `flutter run -t lib/gorouter_example.dart`).
+
+## 3.3.0
+
+### `InfiniteQueriesController` + app-lifecycle handling for polling
+
+* **New: `InfiniteQueriesController<T, PageParam, F>`** — the `useQueries` analogue for infinite
+  lists. One instance observes many filter-sets at once (state `Map<F, QueryState<List<T>>>`), each
+  with independent pagination: `setFilters` / `addFilter` / `removeFilter`, `loadMore(F)`,
+  `refetch(F)`, `invalidate(F)`, `hasMore(F)`, `stateFor(F)`, `updateItem(F, …)` / `removeItem(F, …)`.
+  Internally it manages one `InfiniteQueryController` per filter-set, reusing all pagination logic.
+  Ships with `InfiniteQueriesBuilder` and `InfiniteQueriesProvider`.
+* **New: app-lifecycle handling for `refetchInterval`.** `Timer.periodic` is suspended while the app
+  is backgrounded, so polling stops and data can go stale. A single `AppLifecycleCoordinator` (one
+  `WidgetsBindingObserver` for the whole app, like the connectivity coordinator) now drives every
+  controller: on background the interval pauses; on foreground it resumes **and** refetches per a new
+  `refetchOnAppFocus` option (`always` / `ifStale` (default) / `never`) — the mobile analogue of
+  TanStack's `refetchOnWindowFocus`. `refetchIntervalInBackground` (default `false`) keeps polling in
+  the background. Applies to `QueryController`, `InfiniteQueryController`, and `QueriesController`
+  (which also gains `refetchInterval` polling). New `QueryDefaults.refetchOnAppFocus` /
+  `refetchIntervalInBackground`.
+  * The interval is now **wall-clock aware**: `RefetchIntervalHandle` records the last tick time, so
+    resuming after a background spell doesn't restart the countdown from zero. If a full interval
+    already elapsed while backgrounded the poll fires **immediately** on resume (a 30-min poll
+    backgrounded at 29 min and resumed 5 min later fetches at once); otherwise the next tick fires at
+    the *remaining* time, preserving cadence.
+
+## 3.2.0
+
+### Modular client (SOLID) + a record-owned fetch engine with `QueriesController`
+
+* **Refactored `QueryClient` into single-responsibility collaborators** under `lib/src/client/`
+  (`QueryCacheStore`, `CacheChangeNotifier`, `StaleScheduler`, `GcScheduler`, `ObserverRegistry`,
+  `ConnectivityCoordinator`, `cache_keys`). `QueryClient` is now a thin facade that delegates — no
+  public API change, all existing tests pass unchanged.
+* **New: a record-owned fetch engine.** `QueryClient.fetchQuery(...)` owns the fetch loop — retry,
+  **in-flight dedup**, network gating, and status transitions — writing lifecycle to a per-`(key,
+  params)` runtime record. Concurrent fetches for the same key **coalesce into one request**, and
+  status becomes addressable by params.
+* **New: `client.stateFor<T>(key, params)`** returns the full `QueryState` (data + status) for any
+  param, so loading is readable per-param without a controller instance per param.
+* **New: `QueriesController<T, P>`** — the `useQueries` analogue. One `Cubit<Map<P, QueryState<T>>>`
+  observes a dynamic list of params, each with its own loading/data, fetches deduped and status
+  shared via the engine. Kills the "one instance per param" boilerplate. Ships with a `QueriesBuilder`
+  and a `QueriesProvider` (provide it like any bloc; reach it with `context.query<C>()`).
+  `invalidateQueries` refetches every observed param (active-observer parity with TanStack).
+  Typed, no-serialize helpers: `invalidate(P)`, `refetch(P)`, `addParam(P)` / `removeParam(P)`,
+  `stateFor(P)`, `setData(P, data)` — params are serialized internally, never by the caller.
+* The example **Cache Lab** "Live queries" grid now runs on a single `QueriesController` instead of
+  four hand-managed controllers.
+
+* **Changed: `invalidate` / `invalidateQueries` now KEEP the existing data** (TanStack semantics) —
+  they mark the entry stale and background-refetch, and the current data stays visible (with a
+  refetching/stale indicator) until fresh data arrives, instead of blanking to empty. New
+  **`removeQueries(key, [params])`** performs the explicit hard-drop (what `invalidate` used to do);
+  GC eviction and `clear()` still drop data.
+
+Note: the classic `QueryController` / `InfiniteQueryController` are unchanged and still work; they do
+not yet route their own fetches through the shared engine (so a `QueryController` and a
+`QueriesController` on the same key won't share fetch-status/dedup — data still syncs via the cache).
+
+## 3.1.0
+
+### The QueryClient cache is now the single source of truth for data
+
+Controllers no longer keep their own copy of `data`. Every `QueryController` /
+`InfiniteQueryController` now derives `state.data` from the `QueryClient` cache, and
+subscribes to a new cache-change signal so mounted controllers re-emit when the cache
+changes underneath them. This removes the class of bugs where data lingered after the
+cache was cleared or invalidated. **No compile-time breaking changes** — `QueryState`,
+controller subclass contracts, providers, builders, consumers, selectors, and
+`MutationController` are unchanged.
+
+* **Fixed: stale data lingered after `clear()` / `invalidate()`.** Previously the cache
+  was wiped but mounted controllers kept emitting their private copy of the old data. Now:
+  * `client.clear()` sends every mounted controller's `state.data` to empty/idle (no
+    refetch — the right behavior for logout/reset).
+  * `invalidate()` / `invalidateQueries()` clear the entry and refetch active controllers
+    (TanStack parity, unchanged behavior).
+  * GC eviction empties the (by definition unobserved) entry.
+* **New: cross-controller live sync.** Two controllers on the same `cacheKey` + params now
+  reflect each other's writes immediately, instead of only on remount/refetch.
+* **New: `client.update()` / `updateInfiniteQuery()` propagate immediately** to mounted
+  controllers (previously they emitted nothing until the next read).
+* **New: `QueryState.params`.** Builders/listeners/selectors can now read `state.params`
+  (the params/filters that produced the data) alongside `state.data`, with a typed
+  `state.paramsAs<P>()` accessor.
+* **New: read cached data by typed params without a controller** — `client.getData<T>(key,
+  params)` and the `context.queryData<T>(key, params)` extension serialize params for you.
+  `serializeParams` is now exported.
+* **New: param-scoped access on controllers** — `controller.dataFor([params])` (sync cache
+  read) and `controller.fetchFor(params)` (non-invasive fetch for arbitrary params).
+* **Changed: `InfiniteQueryController.refetch()` now replays all loaded pages** instead of
+  collapsing back to page 1, preserving the user's scroll depth (TanStack parity). Page
+  params are re-derived from freshly fetched pages, exactly like `useInfiniteQuery`.
+* **Changed: `InfiniteQueryController.enabled` is now param-derived**, matching
+  `QueryController`: always `true` for `void` filters, otherwise `true` only when filters
+  are non-null (no fetch fires until filters are set).
+* **New: `QueryDefaults.keepPreviousData`** — set the placeholder-on-param-change behavior
+  globally instead of per controller (`null` defers to each controller's getter, which
+  still defaults to `false`).
+
 ## 3.0.0
 
 ### Breaking changes

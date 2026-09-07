@@ -1,9 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
-import 'package:flutter_query_client/src/helpers.dart';
 import 'package:flutter_query_client/src/utils/error_transform_utils.dart';
 import 'package:flutter_query_client/src/utils/network_error.dart';
 import 'package:flutter_query_client/src/utils/refetch_interval_handle.dart';
@@ -35,6 +33,15 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
   /// Whether initial execution has been done for [NetworkMode.offlineFirst].
   bool _offlineFirstExecuted = false;
 
+  /// Placeholder data carried across a [setParams] transition when
+  /// [keepPreviousData] is set — the previous params' data, shown until the
+  /// new params resolve. Cleared once new data lands.
+  T? _placeholderData;
+
+  /// Re-entrancy guard: true while this controller is mutating the cache
+  /// itself, so its own cache-change callback is a no-op (it emits explicitly).
+  bool _isSelfMutating = false;
+
   /// Stale-listener handle.
   late final StaleListenerHandle _staleHandle = StaleListenerHandle(
     client: client,
@@ -44,12 +51,17 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
   /// Periodic refetch handle.
   final RefetchIntervalHandle _refetchHandle = RefetchIntervalHandle();
 
-  /// Callback stored for invalidation — must be a stable reference
+  /// Callback stored for cache-change events — must be a stable reference
   /// so it can be removed on unregister.
-  late final VoidCallback _onInvalidate = _handleInvalidation;
+  late final void Function(CacheChangeReason) _onCacheChange =
+      _handleCacheChange;
 
   /// Stable reconnect callback reference.
   late final ReconnectCallback _onReconnect = _handleReconnect;
+
+  /// Stable app-lifecycle callbacks.
+  late final void Function() _onAppResume = _handleAppResume;
+  late final void Function() _onAppPause = _handleAppPause;
 
   QueryController(this.cacheKey, {ErrorTransformer? transformError})
     : _transformError = transformError,
@@ -59,13 +71,76 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
     client.registerActiveQuery(
       cacheKey,
       _serializedParams,
-      onInvalidate: _onInvalidate,
+      onCacheChange: _onCacheChange,
     );
     _registerConnectivity();
+    _registerLifecycle();
     _execute();
   }
 
   static bool _checkVoid<X>() => null is X;
+
+  // ─── Cache-derived state ─────────────────────────────────────────
+
+  /// The cache entry for the current params, or null.
+  CachedQueryData<T>? get _cached => client.get<T>(cacheKey, _serializedParams);
+
+  /// `state` overlaid with the current cache data, so synchronous reads
+  /// (`context.query<C>().state.data`) always reflect the cache — the single
+  /// source of truth — even between emits. Placeholder states are left as-is
+  /// because their data comes from a different params key.
+  @override
+  QueryState<T> get state {
+    final base = super.state;
+    if (base.isPlaceholderData) return base;
+    final cached = _cached;
+    // Build a fresh QueryState<T> rather than base.copyWith — the initial
+    // `const QueryState()` can be inferred as QueryState<Null>, whose copyWith
+    // would fail to cast non-null data.
+    return QueryState<T>(
+      data: cached?.data,
+      error: base.error,
+      status: base.status,
+      fetchStatus: base.fetchStatus,
+      isStale: cached?.isStale ?? base.isStale,
+      isLoadingMore: base.isLoadingMore,
+      isPlaceholderData: base.isPlaceholderData,
+      params: _params,
+    );
+  }
+
+  /// Emit a lifecycle state with `data`/`isStale`/`params` sourced from the
+  /// cache. This is the load-bearing path: widget builders receive the emitted
+  /// object (not the [state] getter), so data must be populated here.
+  void _emitFromCache({
+    required QueryStatus status,
+    FetchStatus fetchStatus = FetchStatus.idle,
+    Object? error,
+  }) {
+    final cached = _cached;
+    _safeEmit(
+      QueryState<T>(
+        status: status,
+        data: cached?.data,
+        isStale: cached?.isStale ?? false,
+        fetchStatus: fetchStatus,
+        error: error,
+        params: _params,
+      ),
+    );
+  }
+
+  /// Run a cache mutation initiated by this controller with the self-mutation
+  /// guard raised, so the resulting cache-change callback is suppressed (the
+  /// caller emits explicitly).
+  void _selfMutate(void Function() fn) {
+    _isSelfMutating = true;
+    try {
+      fn();
+    } finally {
+      _isSelfMutating = false;
+    }
+  }
 
   // ─── Safe emit ──────────────────────────────────────────────────
 
@@ -128,6 +203,16 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
   /// - [RefetchOnReconnect.never]: Never auto-refetch on reconnect.
   RefetchOnReconnect get refetchOnReconnect => RefetchOnReconnect.ifStale;
 
+  /// Controls whether this query refetches when the app returns to the
+  /// foreground (mobile analogue of `refetchOnWindowFocus`). Defaults to
+  /// [RefetchOnAppFocus.ifStale].
+  RefetchOnAppFocus get refetchOnAppFocus => RefetchOnAppFocus.ifStale;
+
+  /// Whether [refetchInterval] keeps polling while the app is backgrounded.
+  /// Defaults to `false` — polling pauses in the background and resumes (with a
+  /// focus refetch) when the app returns.
+  bool get refetchIntervalInBackground => false;
+
   /// When true, keeps the previous data visible (with [QueryState.isPlaceholderData]
   /// set to true) while fetching new data after a [setParams] call.
   /// Similar to TanStack Query's `keepPreviousData` / `placeholderData`.
@@ -155,6 +240,12 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       client.defaults.networkMode ?? networkMode;
   RefetchOnReconnect get _resolvedRefetchOnReconnect =>
       client.defaults.refetchOnReconnect ?? refetchOnReconnect;
+  RefetchOnAppFocus get _resolvedRefetchOnAppFocus =>
+      client.defaults.refetchOnAppFocus ?? refetchOnAppFocus;
+  bool get _resolvedRefetchIntervalInBackground =>
+      client.defaults.refetchIntervalInBackground ?? refetchIntervalInBackground;
+  bool get _resolvedKeepPreviousData =>
+      client.defaults.keepPreviousData ?? keepPreviousData;
 
   // ─── Network helpers ────────────────────────────────────────────
 
@@ -184,6 +275,56 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
       _serializedParams,
       _onReconnect,
     );
+  }
+
+  /// Registers app foreground/background handling (lifecycle is app-global, so
+  /// this is done once in the constructor, not per params).
+  void _registerLifecycle() {
+    client.ensureLifecycleInitialized();
+    client.registerLifecycleCallbacks(
+      onResume: _onAppResume,
+      onPause: _onAppPause,
+    );
+  }
+
+  void _unregisterLifecycle() {
+    client.unregisterLifecycleCallbacks(
+      onResume: _onAppResume,
+      onPause: _onAppPause,
+    );
+  }
+
+  /// App backgrounded — pause polling so a suspended timer doesn't drift
+  /// (unless the query opts into background polling).
+  void _handleAppPause() {
+    if (isClosed) return;
+    if (!_resolvedRefetchIntervalInBackground) _refetchHandle.pause();
+  }
+
+  /// App foregrounded — resume polling and refetch per [refetchOnAppFocus],
+  /// catching up data that went stale while backgrounded.
+  void _handleAppResume() {
+    if (isClosed || !enabled) return;
+    // Read overdue status BEFORE resuming (resume resets the baseline).
+    final intervalPastDue = _refetchHandle.isPastDue;
+    if (_refetchHandle.isPaused) _refetchHandle.resume();
+
+    if (state.isError) {
+      _execute();
+      return;
+    }
+    final rof = _resolvedRefetchOnAppFocus;
+    final wantFocusRefetch = rof == RefetchOnAppFocus.always ||
+        (rof == RefetchOnAppFocus.ifStale && state.isStale);
+    // A past-due poll fires regardless of refetchOnAppFocus — the interval was
+    // due while backgrounded and should fire now, not a full period later.
+    if (intervalPastDue || wantFocusRefetch || !state.hasData) {
+      if (state.hasData) {
+        _refetchInternal();
+      } else {
+        _execute();
+      }
+    }
   }
 
   /// Called when the device reconnects to the network.
@@ -236,11 +377,16 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
 
   /// Update params and re-execute if enabled.
   void setParams(P params) {
+    // Capture the current params' data as placeholder before switching keys,
+    // so keepPreviousData can show it while the new params load.
+    _placeholderData =
+        _resolvedKeepPreviousData ? _cached?.data : null;
+
     _unregisterConnectivity();
     client.unregisterActiveQuery(
       cacheKey,
       _serializedParams,
-      onInvalidate: _onInvalidate,
+      onCacheChange: _onCacheChange,
     );
 
     _params = params;
@@ -249,7 +395,7 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
     client.registerActiveQuery(
       cacheKey,
       _serializedParams,
-      onInvalidate: _onInvalidate,
+      onCacheChange: _onCacheChange,
     );
     _registerConnectivity();
 
@@ -270,15 +416,10 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
 
     if (cached != null) {
       QueryLogger.info('[$cacheKey] Cache hit (stale: ${cached.isStale})');
+      _placeholderData = null;
       await Future.delayed(Duration.zero);
       if (_serializedParams != capturedSerialized) return; // params changed
-      _safeEmit(
-        QueryState<T>(
-          status: QueryStatus.success,
-          data: cached.data,
-          isStale: cached.isStale,
-        ),
-      );
+      _emitFromCache(status: QueryStatus.success);
       _registerStaleListener();
       _startRefetchInterval();
       final rom = _resolvedRefetchOnMount;
@@ -310,17 +451,18 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
     if (_serializedParams != capturedSerialized) return; // params changed
     QueryLogger.info('[$cacheKey] Fetching...');
 
-    // keepPreviousData: show old data with isPlaceholderData flag while fetching
-    final previousData = state.data;
-    if (keepPreviousData && previousData != null) {
+    // keepPreviousData: show the previous params' data (captured in setParams)
+    // with the isPlaceholderData flag while the new params fetch.
+    if (_resolvedKeepPreviousData && _placeholderData != null) {
       _safeEmit(QueryState<T>(
         status: QueryStatus.success,
-        data: previousData,
+        data: _placeholderData,
         isPlaceholderData: true,
         fetchStatus: FetchStatus.fetching,
+        params: _params,
       ));
     } else {
-      _safeEmit(const QueryState(status: QueryStatus.loading));
+      _emitFromCache(status: QueryStatus.loading);
     }
 
     try {
@@ -337,7 +479,8 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
         _offlineFirstExecuted = true;
       }
 
-      client.set(
+      _placeholderData = null;
+      _selfMutate(() => client.set(
         cacheKey,
         capturedSerialized,
         CachedQueryData(
@@ -346,24 +489,19 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
           staleTime: _resolvedStaleTime,
           gcTime: _resolvedGcTime,
         ),
-      );
+      ));
       _registerStaleListener();
       _startRefetchInterval();
       QueryLogger.info('[$cacheKey] Fetch success');
       client.reportReachable();
-      _safeEmit(QueryState<T>(status: QueryStatus.success, data: result));
+      _emitFromCache(status: QueryStatus.success);
       if (!completer.isCompleted) completer.complete(result);
       onSuccess(result);
     } catch (e) {
       if (_serializedParams != capturedSerialized) return;
       final transformed = _applyTransformError(e);
       QueryLogger.severe('[$cacheKey] Fetch failed', e);
-      _safeEmit(
-        QueryState<T>(
-          status: QueryStatus.error,
-          error: transformed,
-        ),
-      );
+      _emitFromCache(status: QueryStatus.error, error: transformed);
       if (!completer.isCompleted) completer.completeError(e);
       // Ensure the completer's future error doesn't go unhandled.
       completer.future.ignore();
@@ -395,19 +533,13 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
     }
 
     _serializedParams = serializeParams(_params);
-    final cached = client.get<T>(cacheKey, _serializedParams);
+    final cached = _cached;
 
     if (cached == null) return;
 
-    if (cached.data != state.data) {
-      _safeEmit(
-        QueryState<T>(
-          status: QueryStatus.success,
-          data: cached.data,
-          isStale: cached.isStale,
-        ),
-      );
-    }
+    // Re-emit success from the cache. External writes while hidden already
+    // notified via the cache-change subscription; this ensures a fresh frame.
+    _emitFromCache(status: QueryStatus.success);
 
     _startRefetchInterval();
 
@@ -418,10 +550,34 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
     }
   }
 
-  // ─── Invalidation callback ───────────────────────────────────────
+  // ─── Cache-change callback ───────────────────────────────────────
 
-  void _handleInvalidation() {
-    if (!isClosed) refetch();
+  /// Invoked by [QueryClient] when the cache entry for the current params
+  /// changes. Implements the split eviction policy: `updated` → success from
+  /// cache; `invalidated` → refetch; `cleared`/`evicted` → empty.
+  void _handleCacheChange(CacheChangeReason reason) {
+    if (isClosed || _isSelfMutating) return;
+
+    switch (reason) {
+      case CacheChangeReason.updated:
+      case CacheChangeReason.statusChanged:
+        // Another controller (or client.update) wrote fresh data. Reflect it,
+        // unless we're mid-fetch/error where our own flow will emit.
+        if (_cached != null && !state.isLoading) {
+          _emitFromCache(status: QueryStatus.success);
+        }
+      case CacheChangeReason.invalidated:
+        if (enabled) {
+          refetch();
+        } else {
+          _emitFromCache(status: QueryStatus.idle);
+        }
+      case CacheChangeReason.cleared:
+      case CacheChangeReason.evicted:
+        _placeholderData = null;
+        _staleHandle.unregister();
+        _safeEmit(QueryState<T>(status: QueryStatus.idle, params: _params));
+    }
   }
 
   // ─── ensureData (TanStack's ensureQueryData) ─────────────────────
@@ -466,7 +622,7 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
     _inFlightFetch = completer;
 
     try {
-      _safeEmit(const QueryState(status: QueryStatus.loading));
+      _emitFromCache(status: QueryStatus.loading);
       final result = await retryWithBackoff<T>(
         fn: () => queryFn(capturedParams),
         maxAttempts: _resolvedRetryCount,
@@ -480,7 +636,7 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
         completer.future.ignore();
         throw QueryException('Params changed during ensureData');
       }
-      client.set(
+      _selfMutate(() => client.set(
         cacheKey,
         capturedSerialized,
         CachedQueryData(
@@ -489,18 +645,16 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
           staleTime: _resolvedStaleTime,
           gcTime: _resolvedGcTime,
         ),
-      );
+      ));
       _registerStaleListener();
       client.reportReachable();
-      _safeEmit(QueryState<T>(status: QueryStatus.success, data: result));
+      _emitFromCache(status: QueryStatus.success);
       completer.complete(result);
       return result;
     } catch (e) {
-      _safeEmit(
-        QueryState<T>(
-          status: QueryStatus.error,
-          error: _applyTransformError(e),
-        ),
+      _emitFromCache(
+        status: QueryStatus.error,
+        error: _applyTransformError(e),
       );
       if (!completer.isCompleted) {
         completer.completeError(e);
@@ -542,7 +696,8 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
         shouldAbort: () => _shouldPause,
       );
       if (_serializedParams != capturedSerialized) return;
-      client.set(
+      _placeholderData = null;
+      _selfMutate(() => client.set(
         cacheKey,
         capturedSerialized,
         CachedQueryData(
@@ -551,26 +706,16 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
           staleTime: _resolvedStaleTime,
           gcTime: _resolvedGcTime,
         ),
-      );
+      ));
       _registerStaleListener();
       _startRefetchInterval();
       client.reportReachable();
-      _safeEmit(QueryState<T>(
-        status: QueryStatus.success,
-        data: result,
-      ));
+      _emitFromCache(status: QueryStatus.success);
       onSuccess(result);
     } catch (e) {
       if (_serializedParams != capturedSerialized) return;
       final transformed = _applyTransformError(e);
-      _safeEmit(
-        state.copyWith(
-          status: QueryStatus.error,
-          error: transformed,
-          fetchStatus: FetchStatus.idle,
-          isPlaceholderData: false,
-        ),
-      );
+      _emitFromCache(status: QueryStatus.error, error: transformed);
       onQueryError(transformed);
     }
   }
@@ -579,10 +724,10 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
 
   Future<void> updateCache(T? Function(T? current) updater) async {
     await Future.delayed(Duration.zero);
-    final cached = client.get<T>(cacheKey, _serializedParams);
+    final cached = _cached;
     final updatedData = updater(cached?.data);
     if (updatedData == null) return;
-    client.set(
+    _selfMutate(() => client.set(
       cacheKey,
       _serializedParams,
       CachedQueryData(
@@ -591,20 +736,56 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
         staleTime: _resolvedStaleTime,
         gcTime: _resolvedGcTime,
       ),
-    );
+    ));
     _registerStaleListener();
-    _safeEmit(
-      state.copyWith(
-        status: QueryStatus.success,
-        data: updatedData,
-        isStale: false,
-      ),
-    );
+    _emitFromCache(status: QueryStatus.success);
   }
 
   Future<void> invalidate() async {
-    client.invalidate(cacheKey, _serializedParams);
+    // Guard so the resulting cache-change callback doesn't also refetch — we
+    // do it explicitly below.
+    _selfMutate(() => client.invalidate(cacheKey, _serializedParams));
     await refetch();
+  }
+
+  // ─── Param-scoped access ─────────────────────────────────────────
+
+  /// Synchronously read cached data for the given [params] (defaults to the
+  /// controller's current params). Reads the [QueryClient] cache — the single
+  /// source of truth — so callers don't reach for the client directly.
+  T? dataFor([P? params]) {
+    final serialized =
+        params != null ? serializeParams(params) : _serializedParams;
+    return client.get<T>(cacheKey, serialized)?.data;
+  }
+
+  /// Fetch and cache data for arbitrary [params] without disturbing this
+  /// controller's current params or emitted state. Returns fresh cached data
+  /// when present and not stale, otherwise fetches via [queryFn].
+  Future<T> fetchFor(P params) async {
+    final serialized = serializeParams(params);
+    final cached = client.get<T>(cacheKey, serialized);
+    if (cached != null && cached.data != null && !cached.isStale) {
+      return cached.data;
+    }
+    final result = await retryWithBackoff<T>(
+      fn: () => queryFn(params),
+      maxAttempts: _resolvedRetryCount,
+      baseDelay: _resolvedRetryDelay,
+      shouldAbort: () => _shouldPause,
+    );
+    client.set(
+      cacheKey,
+      serialized,
+      CachedQueryData(
+        data: result,
+        fetchTime: DateTime.now(),
+        staleTime: _resolvedStaleTime,
+        gcTime: _resolvedGcTime,
+      ),
+    );
+    client.reportReachable();
+    return result;
   }
 
   // ─── Stale listener management ───────────────────────────────────
@@ -633,10 +814,11 @@ abstract class QueryController<T, P> extends Cubit<QueryState<T>> {
   @override
   Future<void> close() {
     _unregisterConnectivity();
+    _unregisterLifecycle();
     client.unregisterActiveQuery(
       cacheKey,
       _serializedParams,
-      onInvalidate: _onInvalidate,
+      onCacheChange: _onCacheChange,
     );
     _staleHandle.unregister();
     _refetchHandle.stop();

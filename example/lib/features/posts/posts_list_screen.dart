@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
+import '../../app_navigation.dart';
 import '../../shared.dart';
 import 'post_controllers.dart';
 import 'post_model.dart';
@@ -142,7 +143,9 @@ class _PostsListViewState extends State<_PostsListView> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
+
     return Scaffold(
+      drawer: const AppDrawer(),
       appBar: AppBar(
         title: const Text('Posts'),
         actions: [

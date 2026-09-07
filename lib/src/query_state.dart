@@ -15,6 +15,12 @@ abstract class QueryState<V> with _$QueryState<V> {
     @Default(false) bool isStale,
     @Default(false) bool isLoadingMore,
     @Default(false) bool isPlaceholderData,
+
+    /// The params that produced [data] (a [QueryController]'s `params` or an
+    /// [InfiniteQueryController]'s `filters`). Untyped so the widget-facing
+    /// `QueryState<V>` signature stays single-generic — use [paramsAs] to read
+    /// it back with a type. `null` for mutations and param-less queries.
+    Object? params,
   }) = _QueryState<V>;
 
   // ─── Convenience getters ─────────────────────────────────────────
@@ -31,5 +37,8 @@ abstract class QueryState<V> with _$QueryState<V> {
 
   /// Safely cast [error] to type [E]. Returns null if error is not of type [E].
   E? errorAs<E>() => error is E ? error as E : null;
+
+  /// Safely cast [params] to type [P]. Returns null if params is not of type [P].
+  P? paramsAs<P>() => params is P ? params as P : null;
 }
 

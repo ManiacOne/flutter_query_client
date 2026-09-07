@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -151,7 +150,7 @@ void main() {
           tickerEnabled: tickerEnabled,
           child: QueryProvider<TestQueryController, List<String>>(
             create: (_) => controller,
-            child: BlocBuilder<TestQueryController, QueryState<List<String>>>(
+            child: QueryBuilder<TestQueryController, List<String>>(
               builder: (_, state) => Text(state.data?.join(',') ?? 'loading'),
             ),
           ),
@@ -186,7 +185,7 @@ void main() {
           tickerEnabled: tickerEnabled,
           child: QueryProvider<TestQueryController, List<String>>(
             create: (_) => controller,
-            child: BlocBuilder<TestQueryController, QueryState<List<String>>>(
+            child: QueryBuilder<TestQueryController, List<String>>(
               builder: (_, state) => Text(state.data?.join(',') ?? 'loading'),
             ),
           ),
@@ -221,7 +220,7 @@ void main() {
           tickerEnabled: tickerEnabled,
           child: QueryProvider<TestQueryController, List<String>>(
             create: (_) => controller,
-            child: BlocBuilder<TestQueryController, QueryState<List<String>>>(
+            child: QueryBuilder<TestQueryController, List<String>>(
               builder: (_, state) => Text(state.data?.join(',') ?? 'loading'),
             ),
           ),
@@ -262,7 +261,7 @@ void main() {
           tickerEnabled: tickerEnabled,
           child: QueryProvider<TestQueryController, List<String>>(
             create: (_) => controller,
-            child: BlocBuilder<TestQueryController, QueryState<List<String>>>(
+            child: QueryBuilder<TestQueryController, List<String>>(
               builder: (ctx, state) {
                 capturedContext = ctx;
                 return Text(state.data?.join(',') ?? 'loading');
@@ -298,7 +297,7 @@ void main() {
           tickerEnabled: tickerEnabled,
           child: QueryProvider<DisabledQueryController, String>(
             create: (_) => controller,
-            child: BlocBuilder<DisabledQueryController, QueryState<String>>(
+            child: QueryBuilder<DisabledQueryController, String>(
               builder: (_, state) => Text(state.data ?? 'no-data'),
             ),
           ),
@@ -338,7 +337,7 @@ void main() {
           tickerEnabled: tickerEnabled,
           child: QueryProvider<StaleTestQueryController, String>(
             create: (_) => controller,
-            child: BlocBuilder<StaleTestQueryController, QueryState<String>>(
+            child: QueryBuilder<StaleTestQueryController, String>(
               builder: (_, state) => Text(state.data ?? 'loading'),
             ),
           ),
@@ -419,10 +418,7 @@ void main() {
           tickerEnabled: tickerEnabled,
           child: InfiniteQueryProvider<TestInfiniteQueryController>(
             create: (_) => controller,
-            child: BlocBuilder<
-              TestInfiniteQueryController,
-              QueryState<List<String>>
-            >(builder: (_, state) => Text(state.data?.join(',') ?? 'loading')),
+            child: InfiniteQueryBuilder<TestInfiniteQueryController, String>(builder: (_, state) => Text(state.data?.join(',') ?? 'loading')),
           ),
         ),
       );
@@ -455,10 +451,7 @@ void main() {
           tickerEnabled: tickerEnabled,
           child: InfiniteQueryProvider<TestInfiniteQueryController>(
             create: (_) => controller,
-            child: BlocBuilder<
-              TestInfiniteQueryController,
-              QueryState<List<String>>
-            >(builder: (_, state) => Text(state.data?.join(',') ?? 'loading')),
+            child: InfiniteQueryBuilder<TestInfiniteQueryController, String>(builder: (_, state) => Text(state.data?.join(',') ?? 'loading')),
           ),
         ),
       );
@@ -506,10 +499,7 @@ void main() {
                   children: [
                     QueryProvider<TestQueryController, List<String>>(
                       create: (_) => postsController,
-                      child: BlocBuilder<
-                        TestQueryController,
-                        QueryState<List<String>>
-                      >(
+                      child: QueryBuilder<TestQueryController, List<String>>(
                         builder:
                             (_, state) =>
                                 Text(state.data?.join(',') ?? 'loading-posts'),
@@ -517,10 +507,7 @@ void main() {
                     ),
                     QueryProvider<TestQueryController, List<String>>(
                       create: (_) => productsController,
-                      child: BlocBuilder<
-                        TestQueryController,
-                        QueryState<List<String>>
-                      >(
+                      child: QueryBuilder<TestQueryController, List<String>>(
                         builder:
                             (_, state) => Text(
                               state.data?.join(',') ?? 'loading-products',
@@ -571,10 +558,7 @@ void main() {
                   children: [
                     InfiniteQueryProvider<TestInfiniteQueryController>(
                       create: (_) => controller,
-                      child: BlocBuilder<
-                        TestInfiniteQueryController,
-                        QueryState<List<String>>
-                      >(
+                      child: InfiniteQueryBuilder<TestInfiniteQueryController, String>(
                         builder:
                             (_, state) =>
                                 Text(state.data?.join(',') ?? 'loading'),
@@ -602,6 +586,97 @@ void main() {
   });
 
   // ═══════════════════════════════════════════════════════════════════
+  // QueryNavigatorObserver (Navigator push/pop detection) — new in 4.0
+  // ═══════════════════════════════════════════════════════════════════
+
+  group('QueryNavigatorObserver (push/pop detection)', () {
+    testWidgets('popping a pushed page refetches the revealed screen', (
+      tester,
+    ) async {
+      final controller = TestQueryController(
+        key: 'nav-pop-test',
+        fetchFn: () async => ['a', 'b'],
+      );
+
+      late BuildContext listContext;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorObservers: [QueryNavigatorObserver.instance],
+          home: QueryProvider<TestQueryController, List<String>>(
+            create: (_) => controller,
+            child: Builder(
+              builder: (ctx) {
+                listContext = ctx;
+                return QueryBuilder<TestQueryController, List<String>>(builder: (_, state) => Text(state.data?.join(',') ?? 'loading'));
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      final countBeforePush = controller.fetchCount;
+      expect(countBeforePush, greaterThanOrEqualTo(1));
+
+      // Push a full-screen page over the list, then pop back.
+      Navigator.of(listContext).push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('detail')),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('detail'), findsOneWidget);
+
+      final countWhileCovered = controller.fetchCount;
+      Navigator.of(listContext).pop();
+      await tester.pumpAndSettle();
+
+      // didPopNext → handleRemount → refetch (refetchOnMount defaults to always).
+      expect(controller.fetchCount, greaterThan(countWhileCovered));
+    });
+
+    testWidgets('dismissing a dialog does NOT refetch (PopupRoute ignored)', (
+      tester,
+    ) async {
+      final controller = TestQueryController(
+        key: 'nav-dialog-test',
+        fetchFn: () async => ['a', 'b'],
+      );
+
+      late BuildContext listContext;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorObservers: [QueryNavigatorObserver.instance],
+          home: QueryProvider<TestQueryController, List<String>>(
+            create: (_) => controller,
+            child: Builder(
+              builder: (ctx) {
+                listContext = ctx;
+                return const Text('list');
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      final countBeforeDialog = controller.fetchCount;
+
+      showDialog<void>(
+        context: listContext,
+        builder: (_) => const AlertDialog(title: Text('Confirm?')),
+      );
+      await tester.pumpAndSettle();
+      Navigator.of(listContext).pop();
+      await tester.pumpAndSettle();
+
+      expect(controller.fetchCount, countBeforeDialog);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
   // Edge cases
   // ═══════════════════════════════════════════════════════════════════
 
@@ -622,7 +697,7 @@ void main() {
               );
               return controller;
             },
-            child: BlocBuilder<TestQueryController, QueryState<List<String>>>(
+            child: QueryBuilder<TestQueryController, List<String>>(
               builder: (_, state) => Text(state.data?.join(',') ?? 'loading'),
             ),
           ),
@@ -655,7 +730,7 @@ void main() {
           tickerEnabled: tickerEnabled,
           child: QueryProvider<TestQueryController, List<String>>(
             create: (_) => controller,
-            child: BlocBuilder<TestQueryController, QueryState<List<String>>>(
+            child: QueryBuilder<TestQueryController, List<String>>(
               builder: (_, state) => Text(state.data?.join(',') ?? 'loading'),
             ),
           ),

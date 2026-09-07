@@ -1,4 +1,5 @@
 import 'package:flutter_query_client/src/enums/network_mode.dart';
+import 'package:flutter_query_client/src/enums/refetch_on_app_focus.dart';
 import 'package:flutter_query_client/src/enums/refetch_on_mount.dart';
 import 'package:flutter_query_client/src/enums/refetch_on_reconnect.dart';
 import 'package:flutter_query_client/src/network/probe_target.dart';
@@ -25,6 +26,22 @@ class QueryDefaults {
   final ErrorTransformer? transformError;
   final NetworkMode? networkMode;
   final RefetchOnReconnect? refetchOnReconnect;
+
+  /// Global default for refetching when the app returns to the foreground
+  /// (mobile analogue of `refetchOnWindowFocus`). `null` defers to each
+  /// controller's `refetchOnAppFocus` (which defaults to `ifStale`).
+  final RefetchOnAppFocus? refetchOnAppFocus;
+
+  /// Global default for whether the `refetchInterval` timer keeps polling while
+  /// the app is backgrounded. `null`/`false` pauses polling in the background
+  /// and resumes (refetching per `refetchOnAppFocus`) on resume.
+  final bool? refetchIntervalInBackground;
+
+  /// Global default for keeping the previous params' data visible (flagged
+  /// [QueryState.isPlaceholderData]) while a new params fetch is in flight,
+  /// instead of flashing a loading state. `null` defers to each controller's
+  /// `keepPreviousData` getter (which defaults to `false`).
+  final bool? keepPreviousData;
 
   /// Hosts the native connectivity probe attempts to reach when confirming
   /// reachability (used only as a tiebreaker — the app's own request outcomes
@@ -75,6 +92,9 @@ class QueryDefaults {
     this.transformError,
     this.networkMode,
     this.refetchOnReconnect,
+    this.refetchOnAppFocus,
+    this.refetchIntervalInBackground,
+    this.keepPreviousData,
     this.connectivityProbeTargets,
     this.initialPageParam = 0,
     this.limit = 20,

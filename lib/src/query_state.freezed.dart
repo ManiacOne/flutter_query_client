@@ -14,7 +14,11 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$QueryState<V> {
 
- V? get data; Object? get error; QueryStatus get status; FetchStatus get fetchStatus; bool get isStale; bool get isLoadingMore; bool get isPlaceholderData;
+ V? get data; Object? get error; QueryStatus get status; FetchStatus get fetchStatus; bool get isStale; bool get isLoadingMore; bool get isPlaceholderData;/// The params that produced [data] (a [QueryController]'s `params` or an
+/// [InfiniteQueryController]'s `filters`). Untyped so the widget-facing
+/// `QueryState<V>` signature stays single-generic — use [paramsAs] to read
+/// it back with a type. `null` for mutations and param-less queries.
+ Object? get params;
 /// Create a copy of QueryState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -25,16 +29,16 @@ $QueryStateCopyWith<V, QueryState<V>> get copyWith => _$QueryStateCopyWithImpl<V
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is QueryState<V>&&const DeepCollectionEquality().equals(other.data, data)&&const DeepCollectionEquality().equals(other.error, error)&&(identical(other.status, status) || other.status == status)&&(identical(other.fetchStatus, fetchStatus) || other.fetchStatus == fetchStatus)&&(identical(other.isStale, isStale) || other.isStale == isStale)&&(identical(other.isLoadingMore, isLoadingMore) || other.isLoadingMore == isLoadingMore)&&(identical(other.isPlaceholderData, isPlaceholderData) || other.isPlaceholderData == isPlaceholderData));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is QueryState<V>&&const DeepCollectionEquality().equals(other.data, data)&&const DeepCollectionEquality().equals(other.error, error)&&(identical(other.status, status) || other.status == status)&&(identical(other.fetchStatus, fetchStatus) || other.fetchStatus == fetchStatus)&&(identical(other.isStale, isStale) || other.isStale == isStale)&&(identical(other.isLoadingMore, isLoadingMore) || other.isLoadingMore == isLoadingMore)&&(identical(other.isPlaceholderData, isPlaceholderData) || other.isPlaceholderData == isPlaceholderData)&&const DeepCollectionEquality().equals(other.params, params));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(data),const DeepCollectionEquality().hash(error),status,fetchStatus,isStale,isLoadingMore,isPlaceholderData);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(data),const DeepCollectionEquality().hash(error),status,fetchStatus,isStale,isLoadingMore,isPlaceholderData,const DeepCollectionEquality().hash(params));
 
 @override
 String toString() {
-  return 'QueryState<$V>(data: $data, error: $error, status: $status, fetchStatus: $fetchStatus, isStale: $isStale, isLoadingMore: $isLoadingMore, isPlaceholderData: $isPlaceholderData)';
+  return 'QueryState<$V>(data: $data, error: $error, status: $status, fetchStatus: $fetchStatus, isStale: $isStale, isLoadingMore: $isLoadingMore, isPlaceholderData: $isPlaceholderData, params: $params)';
 }
 
 
@@ -45,7 +49,7 @@ abstract mixin class $QueryStateCopyWith<V,$Res>  {
   factory $QueryStateCopyWith(QueryState<V> value, $Res Function(QueryState<V>) _then) = _$QueryStateCopyWithImpl;
 @useResult
 $Res call({
- V? data, Object? error, QueryStatus status, FetchStatus fetchStatus, bool isStale, bool isLoadingMore, bool isPlaceholderData
+ V? data, Object? error, QueryStatus status, FetchStatus fetchStatus, bool isStale, bool isLoadingMore, bool isPlaceholderData, Object? params
 });
 
 
@@ -62,7 +66,7 @@ class _$QueryStateCopyWithImpl<V,$Res>
 
 /// Create a copy of QueryState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? data = freezed,Object? error = freezed,Object? status = null,Object? fetchStatus = null,Object? isStale = null,Object? isLoadingMore = null,Object? isPlaceholderData = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? data = freezed,Object? error = freezed,Object? status = null,Object? fetchStatus = null,Object? isStale = null,Object? isLoadingMore = null,Object? isPlaceholderData = null,Object? params = freezed,}) {
   return _then(_self.copyWith(
 data: freezed == data ? _self.data : data // ignore: cast_nullable_to_non_nullable
 as V?,error: freezed == error ? _self.error : error ,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
@@ -70,7 +74,7 @@ as QueryStatus,fetchStatus: null == fetchStatus ? _self.fetchStatus : fetchStatu
 as FetchStatus,isStale: null == isStale ? _self.isStale : isStale // ignore: cast_nullable_to_non_nullable
 as bool,isLoadingMore: null == isLoadingMore ? _self.isLoadingMore : isLoadingMore // ignore: cast_nullable_to_non_nullable
 as bool,isPlaceholderData: null == isPlaceholderData ? _self.isPlaceholderData : isPlaceholderData // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,params: freezed == params ? _self.params : params ,
   ));
 }
 
@@ -155,10 +159,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( V? data,  Object? error,  QueryStatus status,  FetchStatus fetchStatus,  bool isStale,  bool isLoadingMore,  bool isPlaceholderData)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( V? data,  Object? error,  QueryStatus status,  FetchStatus fetchStatus,  bool isStale,  bool isLoadingMore,  bool isPlaceholderData,  Object? params)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _QueryState() when $default != null:
-return $default(_that.data,_that.error,_that.status,_that.fetchStatus,_that.isStale,_that.isLoadingMore,_that.isPlaceholderData);case _:
+return $default(_that.data,_that.error,_that.status,_that.fetchStatus,_that.isStale,_that.isLoadingMore,_that.isPlaceholderData,_that.params);case _:
   return orElse();
 
 }
@@ -176,10 +180,10 @@ return $default(_that.data,_that.error,_that.status,_that.fetchStatus,_that.isSt
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( V? data,  Object? error,  QueryStatus status,  FetchStatus fetchStatus,  bool isStale,  bool isLoadingMore,  bool isPlaceholderData)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( V? data,  Object? error,  QueryStatus status,  FetchStatus fetchStatus,  bool isStale,  bool isLoadingMore,  bool isPlaceholderData,  Object? params)  $default,) {final _that = this;
 switch (_that) {
 case _QueryState():
-return $default(_that.data,_that.error,_that.status,_that.fetchStatus,_that.isStale,_that.isLoadingMore,_that.isPlaceholderData);case _:
+return $default(_that.data,_that.error,_that.status,_that.fetchStatus,_that.isStale,_that.isLoadingMore,_that.isPlaceholderData,_that.params);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -196,10 +200,10 @@ return $default(_that.data,_that.error,_that.status,_that.fetchStatus,_that.isSt
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( V? data,  Object? error,  QueryStatus status,  FetchStatus fetchStatus,  bool isStale,  bool isLoadingMore,  bool isPlaceholderData)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( V? data,  Object? error,  QueryStatus status,  FetchStatus fetchStatus,  bool isStale,  bool isLoadingMore,  bool isPlaceholderData,  Object? params)?  $default,) {final _that = this;
 switch (_that) {
 case _QueryState() when $default != null:
-return $default(_that.data,_that.error,_that.status,_that.fetchStatus,_that.isStale,_that.isLoadingMore,_that.isPlaceholderData);case _:
+return $default(_that.data,_that.error,_that.status,_that.fetchStatus,_that.isStale,_that.isLoadingMore,_that.isPlaceholderData,_that.params);case _:
   return null;
 
 }
@@ -211,7 +215,7 @@ return $default(_that.data,_that.error,_that.status,_that.fetchStatus,_that.isSt
 
 
 class _QueryState<V> extends QueryState<V> {
-  const _QueryState({this.data, this.error, this.status = QueryStatus.idle, this.fetchStatus = FetchStatus.idle, this.isStale = false, this.isLoadingMore = false, this.isPlaceholderData = false}): super._();
+  const _QueryState({this.data, this.error, this.status = QueryStatus.idle, this.fetchStatus = FetchStatus.idle, this.isStale = false, this.isLoadingMore = false, this.isPlaceholderData = false, this.params}): super._();
   
 
 @override final  V? data;
@@ -221,6 +225,11 @@ class _QueryState<V> extends QueryState<V> {
 @override@JsonKey() final  bool isStale;
 @override@JsonKey() final  bool isLoadingMore;
 @override@JsonKey() final  bool isPlaceholderData;
+/// The params that produced [data] (a [QueryController]'s `params` or an
+/// [InfiniteQueryController]'s `filters`). Untyped so the widget-facing
+/// `QueryState<V>` signature stays single-generic — use [paramsAs] to read
+/// it back with a type. `null` for mutations and param-less queries.
+@override final  Object? params;
 
 /// Create a copy of QueryState
 /// with the given fields replaced by the non-null parameter values.
@@ -232,16 +241,16 @@ _$QueryStateCopyWith<V, _QueryState<V>> get copyWith => __$QueryStateCopyWithImp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _QueryState<V>&&const DeepCollectionEquality().equals(other.data, data)&&const DeepCollectionEquality().equals(other.error, error)&&(identical(other.status, status) || other.status == status)&&(identical(other.fetchStatus, fetchStatus) || other.fetchStatus == fetchStatus)&&(identical(other.isStale, isStale) || other.isStale == isStale)&&(identical(other.isLoadingMore, isLoadingMore) || other.isLoadingMore == isLoadingMore)&&(identical(other.isPlaceholderData, isPlaceholderData) || other.isPlaceholderData == isPlaceholderData));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _QueryState<V>&&const DeepCollectionEquality().equals(other.data, data)&&const DeepCollectionEquality().equals(other.error, error)&&(identical(other.status, status) || other.status == status)&&(identical(other.fetchStatus, fetchStatus) || other.fetchStatus == fetchStatus)&&(identical(other.isStale, isStale) || other.isStale == isStale)&&(identical(other.isLoadingMore, isLoadingMore) || other.isLoadingMore == isLoadingMore)&&(identical(other.isPlaceholderData, isPlaceholderData) || other.isPlaceholderData == isPlaceholderData)&&const DeepCollectionEquality().equals(other.params, params));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(data),const DeepCollectionEquality().hash(error),status,fetchStatus,isStale,isLoadingMore,isPlaceholderData);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(data),const DeepCollectionEquality().hash(error),status,fetchStatus,isStale,isLoadingMore,isPlaceholderData,const DeepCollectionEquality().hash(params));
 
 @override
 String toString() {
-  return 'QueryState<$V>(data: $data, error: $error, status: $status, fetchStatus: $fetchStatus, isStale: $isStale, isLoadingMore: $isLoadingMore, isPlaceholderData: $isPlaceholderData)';
+  return 'QueryState<$V>(data: $data, error: $error, status: $status, fetchStatus: $fetchStatus, isStale: $isStale, isLoadingMore: $isLoadingMore, isPlaceholderData: $isPlaceholderData, params: $params)';
 }
 
 
@@ -252,7 +261,7 @@ abstract mixin class _$QueryStateCopyWith<V,$Res> implements $QueryStateCopyWith
   factory _$QueryStateCopyWith(_QueryState<V> value, $Res Function(_QueryState<V>) _then) = __$QueryStateCopyWithImpl;
 @override @useResult
 $Res call({
- V? data, Object? error, QueryStatus status, FetchStatus fetchStatus, bool isStale, bool isLoadingMore, bool isPlaceholderData
+ V? data, Object? error, QueryStatus status, FetchStatus fetchStatus, bool isStale, bool isLoadingMore, bool isPlaceholderData, Object? params
 });
 
 
@@ -269,7 +278,7 @@ class __$QueryStateCopyWithImpl<V,$Res>
 
 /// Create a copy of QueryState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? data = freezed,Object? error = freezed,Object? status = null,Object? fetchStatus = null,Object? isStale = null,Object? isLoadingMore = null,Object? isPlaceholderData = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? data = freezed,Object? error = freezed,Object? status = null,Object? fetchStatus = null,Object? isStale = null,Object? isLoadingMore = null,Object? isPlaceholderData = null,Object? params = freezed,}) {
   return _then(_QueryState<V>(
 data: freezed == data ? _self.data : data // ignore: cast_nullable_to_non_nullable
 as V?,error: freezed == error ? _self.error : error ,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
@@ -277,7 +286,7 @@ as QueryStatus,fetchStatus: null == fetchStatus ? _self.fetchStatus : fetchStatu
 as FetchStatus,isStale: null == isStale ? _self.isStale : isStale // ignore: cast_nullable_to_non_nullable
 as bool,isLoadingMore: null == isLoadingMore ? _self.isLoadingMore : isLoadingMore // ignore: cast_nullable_to_non_nullable
 as bool,isPlaceholderData: null == isPlaceholderData ? _self.isPlaceholderData : isPlaceholderData // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,params: freezed == params ? _self.params : params ,
   ));
 }
 

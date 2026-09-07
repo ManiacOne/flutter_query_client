@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_query_client/flutter_query_client.dart';
+import '../../app_navigation.dart';
 import '../../core/api_client.dart';
 import '../../shared.dart';
 import '../posts/post_controllers.dart';
@@ -76,6 +77,7 @@ class WidgetsShowcaseScreen extends StatelessWidget {
           ),
         ],
         child: Scaffold(
+          drawer: const AppDrawer(),
           appBar: AppBar(title: const Text('Widget Showcase')),
           body: _ShowcaseBody(),
         ),

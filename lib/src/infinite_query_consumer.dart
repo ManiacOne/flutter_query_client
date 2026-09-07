@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_query_client/src/visibility/refetch_visibility.dart';
 import 'package:flutter_query_client/src/query_state.dart';
 
 /// Combines [InfiniteQueryBuilder] and [InfiniteQueryListener] in a single
@@ -38,12 +39,15 @@ class InfiniteQueryConsumer<
 
   @override
   Widget build(BuildContext context) {
-    return BlocConsumer<B, QueryState<List<T>>>(
+    return QueryRemountScope<B>(
       bloc: bloc,
-      builder: builder,
-      listener: listener,
-      buildWhen: buildWhen,
-      listenWhen: listenWhen,
+      child: BlocConsumer<B, QueryState<List<T>>>(
+        bloc: bloc,
+        builder: builder,
+        listener: listener,
+        buildWhen: buildWhen,
+        listenWhen: listenWhen,
+      ),
     );
   }
 }

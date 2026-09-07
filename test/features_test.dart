@@ -86,6 +86,24 @@ class ParamQueryController extends QueryController<String, int> {
   }
 }
 
+/// Param controller with a real fetch delay, so a keepPreviousData placeholder
+/// window is observable.
+class DelayedParamController extends QueryController<String, int> {
+  DelayedParamController({String key = 'delayed-param'}) : super(key);
+
+  @override
+  int get retryCount => 1;
+
+  @override
+  bool get keepPreviousData => true;
+
+  @override
+  Future<String> queryFn(int? params) async {
+    await Future.delayed(const Duration(milliseconds: 60));
+    return 'result-$params';
+  }
+}
+
 class SimpleInfiniteController
     extends InfiniteQueryController<String, int, void> {
   final Future<List<String>> Function(int page) fetchFn;
@@ -132,6 +150,32 @@ class MockedQueryController extends QueryController<String, void> {
   Future<String> queryFn(void params) {
     fetchCount++;
     return api.fetchData('data');
+  }
+}
+
+/// Infinite controller with a non-void filters type, to exercise param-derived
+/// `enabled` (no fetch until filters are set).
+class FilteredInfiniteController
+    extends InfiniteQueryController<String, int, String> {
+  int fetchCount = 0;
+
+  FilteredInfiniteController({String key = 'filtered-infinite'}) : super(key);
+
+  @override
+  int get limit => 2;
+  @override
+  int get initialPageParam => 0;
+
+  @override
+  int? getNextPageParam(List<String> lastPage, List<List<String>> allPages) {
+    if (lastPage.length < limit) return null;
+    return allPages.length;
+  }
+
+  @override
+  Future<List<String>> queryFn(int pageParam, String? filters) async {
+    fetchCount++;
+    return ['$filters-$pageParam-a', '$filters-$pageParam-b'];
   }
 }
 
@@ -582,7 +626,8 @@ void main() {
   // ═══════════════════════════════════════════════════════════════════
 
   group('invalidateQueries', () {
-    test('invalidates cache for specified keys', () async {
+    test('keeps data but marks specified keys stale (removeQueries drops it)',
+        () async {
       QueryClient.instance.set<String>(
         'key1',
         null,
@@ -601,9 +646,17 @@ void main() {
 
       QueryClient.instance.invalidateQueries(['key1', 'key2']);
 
+      // TanStack semantics: data is KEPT (background refetch), not discarded.
+      expect(QueryClient.instance.get<String>('key1', null), isNotNull);
+      expect(QueryClient.instance.get<String>('key2', null), isNotNull);
+      // But the invalidated keys are marked stale; key3 is untouched.
+      expect(QueryClient.instance.stateFor<String>('key1').isStale, isTrue);
+      expect(QueryClient.instance.stateFor<String>('key2').isStale, isTrue);
+      expect(QueryClient.instance.stateFor<String>('key3').isStale, isFalse);
+
+      // removeQueries is the explicit hard-drop.
+      QueryClient.instance.removeQueries('key1');
       expect(QueryClient.instance.get<String>('key1', null), isNull);
-      expect(QueryClient.instance.get<String>('key2', null), isNull);
-      expect(QueryClient.instance.get<String>('key3', null), isNotNull);
     });
 
     test('triggers refetch on active controllers', () async {
@@ -748,7 +801,7 @@ void main() {
       await controller.close();
     });
 
-    test('refetch resets to initial page', () async {
+    test('refetch replays all loaded pages (preserves depth)', () async {
       final controller = SimpleInfiniteController(
         key: 'cursor-refetch',
         fetchFn: (page) async => ['p${page}_a', 'p${page}_b'],
@@ -763,8 +816,10 @@ void main() {
       await controller.refetch();
       await Future.delayed(const Duration(milliseconds: 50));
 
-      expect(controller.currentPage, 1);
-      expect(controller.state.data, ['p0_a', 'p0_b']);
+      // TanStack parity: refetch re-fetches every loaded page rather than
+      // collapsing back to page 1.
+      expect(controller.currentPage, 2);
+      expect(controller.state.data, ['p0_a', 'p0_b', 'p1_a', 'p1_b']);
 
       await controller.close();
     });
@@ -794,6 +849,156 @@ void main() {
       QueryClient.instance.invalidateQueries(['register-test']);
       await Future.delayed(const Duration(milliseconds: 100));
       expect(controller.fetchCount, countAfterClose);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Cache-as-source-of-truth
+  // ═══════════════════════════════════════════════════════════════════
+
+  group('Cache as source of truth', () {
+    test('clear() empties state.data on a mounted controller (no refetch)',
+        () async {
+      final controller = SimpleQueryController(
+        key: 'clear-empties',
+        fetchFn: () async => 'hello',
+      );
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(controller.state.data, 'hello');
+
+      final countBefore = controller.fetchCount;
+      QueryClient.instance.clear();
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(controller.state.data, isNull);
+      expect(controller.state.isIdle, isTrue);
+      // clear() must not trigger a refetch.
+      expect(controller.fetchCount, countBefore);
+
+      await controller.close();
+    });
+
+    test('invalidate() clears cache and refetches', () async {
+      final controller = SimpleQueryController(
+        key: 'invalidate-refetch',
+        fetchFn: () async => 'data',
+      );
+      await Future.delayed(const Duration(milliseconds: 50));
+      final countBefore = controller.fetchCount;
+
+      await controller.invalidate();
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(controller.fetchCount, greaterThan(countBefore));
+      expect(controller.state.data, 'data');
+
+      await controller.close();
+    });
+
+    test('two controllers on the same key sync live', () async {
+      final a = SimpleQueryController(key: 'sync-key', fetchFn: () async => 'a');
+      final b = SimpleQueryController(key: 'sync-key', fetchFn: () async => 'b');
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      // A writes fresh data into the shared cache entry; B reflects it without
+      // its own refetch.
+      await a.updateCache((_) => 'shared');
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      expect(a.state.data, 'shared');
+      expect(b.state.data, 'shared');
+
+      await a.close();
+      await b.close();
+    });
+
+    test('client.update() propagates to a mounted controller immediately',
+        () async {
+      final controller = SimpleQueryController(
+        key: 'update-prop',
+        fetchFn: () async => 'v1',
+      );
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      QueryClient.instance.update<String>('update-prop', (_) => 'v2');
+      await Future.delayed(const Duration(milliseconds: 20));
+
+      expect(controller.state.data, 'v2');
+
+      await controller.close();
+    });
+
+    test('state.params is exposed and getData reads by typed params', () async {
+      final controller = ParamQueryController(key: 'params-expose');
+      controller.setParams(7);
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(controller.state.data, 'result-7');
+      expect(controller.state.params, 7);
+      expect(controller.state.paramsAs<int>(), 7);
+
+      // Typed read-by-params without a controller.
+      expect(QueryClient.instance.getData<String>('params-expose', 7),
+          'result-7');
+      expect(controller.dataFor(7), 'result-7');
+
+      await controller.close();
+    });
+
+    test('InfiniteQueryController gates on param-derived enabled', () async {
+      final controller = FilteredInfiniteController(key: 'infinite-enabled');
+      // filters null → disabled → no fetch.
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(controller.fetchCount, 0);
+      expect(controller.state.hasData, isFalse);
+
+      controller.setParams('q');
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(controller.fetchCount, greaterThan(0));
+      expect(controller.state.data, isNotNull);
+
+      await controller.close();
+    });
+
+    test('keepPreviousData keeps prior data visible during param switch',
+        () async {
+      final controller = DelayedParamController(key: 'kpd');
+      controller.setParams(1);
+      await Future.delayed(const Duration(milliseconds: 120));
+      expect(controller.state.data, 'result-1');
+
+      // Switch params: previous data stays visible (placeholder) while the new
+      // params fetch is in flight.
+      controller.setParams(2);
+      await Future.delayed(const Duration(milliseconds: 20));
+      expect(controller.state.isPlaceholderData, isTrue);
+      expect(controller.state.data, 'result-1');
+
+      await Future.delayed(const Duration(milliseconds: 80));
+      expect(controller.state.isPlaceholderData, isFalse);
+      expect(controller.state.data, 'result-2');
+
+      await controller.close();
+    });
+
+    test('global QueryDefaults.keepPreviousData is honored', () async {
+      QueryClient.instance
+          .setDefaults(const QueryDefaults(keepPreviousData: true));
+
+      // ParamQueryController does not override keepPreviousData — it comes
+      // from the global default here.
+      final controller = ParamQueryController(key: 'kpd-global');
+      expect(controller.keepPreviousData, isFalse); // controller-level default
+      controller.setParams(1);
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(controller.state.data, 'result-1');
+
+      controller.setParams(2);
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(controller.state.data, 'result-2');
+
+      await controller.close();
+      QueryClient.instance.setDefaults(const QueryDefaults());
     });
   });
 }
