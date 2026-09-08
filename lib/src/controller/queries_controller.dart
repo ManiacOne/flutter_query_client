@@ -71,47 +71,65 @@ abstract class QueriesController<T, P> extends Cubit<Map<P, QueryState<T>>> {
   /// Fetch a single param's data.
   Future<T> queryFn(P params);
 
-  /// How long data is considered fresh. null = never stale automatically.
+  // Option getters. `null` = not overridden → precedence is
+  // **controller override → global [QueryDefaults] → hardcoded fallback**.
+
+  /// How long data is considered fresh. `null` defers to [QueryDefaults.staleTime].
   Duration? get staleTime => null;
 
-  /// Number of retry attempts on failure.
-  int get retryCount => 3;
+  /// How long unobserved cache entries are kept before GC. `null` defers to
+  /// [QueryDefaults.gcTime] (default `null` = keep forever).
+  Duration? get gcTime => null;
 
-  /// Base delay between retries (exponential backoff).
-  Duration get retryDelay => const Duration(seconds: 1);
+  /// Number of retry attempts on failure. `null` defers to
+  /// [QueryDefaults.retryCount], then `3`.
+  int? get retryCount => null;
 
-  /// Network mode for these queries.
-  NetworkMode get networkMode => NetworkMode.online;
+  /// Base delay between retries (exponential backoff). `null` defers to
+  /// [QueryDefaults.retryDelay], then 1 second.
+  Duration? get retryDelay => null;
+
+  /// Network mode for these queries. `null` defers to [QueryDefaults.networkMode],
+  /// then [NetworkMode.online].
+  NetworkMode? get networkMode => null;
 
   /// If set, every observed param is refetched on this interval (polling).
+  /// `null` defers to [QueryDefaults.refetchInterval].
   Duration? get refetchInterval => null;
 
-  /// Policy for [handleRemount] (refetch-on-visible) — refetch observed params
-  /// when the screen becomes visible again. Defaults to [RefetchOnMount.always].
-  RefetchOnMount get refetchOnMount => RefetchOnMount.always;
+  /// Policy for [handleRemount] (refetch-on-visible). `null` defers to
+  /// [QueryDefaults.refetchOnMount], then [RefetchOnMount.always].
+  RefetchOnMount? get refetchOnMount => null;
 
-  /// Refetch stale params when the app returns to the foreground.
-  RefetchOnAppFocus get refetchOnAppFocus => RefetchOnAppFocus.ifStale;
+  /// Refetch stale params when the app returns to the foreground. `null` defers
+  /// to [QueryDefaults.refetchOnAppFocus], then [RefetchOnAppFocus.ifStale].
+  RefetchOnAppFocus? get refetchOnAppFocus => null;
 
   /// Whether [refetchInterval] keeps polling while the app is backgrounded.
-  bool get refetchIntervalInBackground => false;
+  /// `null` defers to [QueryDefaults.refetchIntervalInBackground], then `false`.
+  bool? get refetchIntervalInBackground => null;
 
   // ─── Resolved defaults (controller override → global → hardcoded) ─
 
   Duration? get _resolvedStaleTime => staleTime ?? client.defaults.staleTime;
-  Duration? get _resolvedGcTime => client.defaults.gcTime;
-  int get _resolvedRetryCount => client.defaults.retryCount ?? retryCount;
-  Duration get _resolvedRetryDelay => client.defaults.retryDelay ?? retryDelay;
+  Duration? get _resolvedGcTime => gcTime ?? client.defaults.gcTime;
+  int get _resolvedRetryCount => retryCount ?? client.defaults.retryCount ?? 3;
+  Duration get _resolvedRetryDelay =>
+      retryDelay ?? client.defaults.retryDelay ?? const Duration(seconds: 1);
   NetworkMode get _resolvedNetworkMode =>
-      client.defaults.networkMode ?? networkMode;
+      networkMode ?? client.defaults.networkMode ?? NetworkMode.online;
   RefetchOnMount get _resolvedRefetchOnMount =>
-      client.defaults.refetchOnMount ?? refetchOnMount;
+      refetchOnMount ?? client.defaults.refetchOnMount ?? RefetchOnMount.always;
   Duration? get _resolvedRefetchInterval =>
       refetchInterval ?? client.defaults.refetchInterval;
   RefetchOnAppFocus get _resolvedRefetchOnAppFocus =>
-      client.defaults.refetchOnAppFocus ?? refetchOnAppFocus;
+      refetchOnAppFocus ??
+      client.defaults.refetchOnAppFocus ??
+      RefetchOnAppFocus.ifStale;
   bool get _resolvedRefetchIntervalInBackground =>
-      client.defaults.refetchIntervalInBackground ?? refetchIntervalInBackground;
+      refetchIntervalInBackground ??
+      client.defaults.refetchIntervalInBackground ??
+      false;
   Object Function(Object)? get _resolvedTransform =>
       _transformError ?? client.defaults.transformError;
 

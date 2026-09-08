@@ -283,41 +283,56 @@ abstract class InfiniteQueryController<T, PageParam, P>
   /// always `true` for `void` filters, otherwise `true` when filters != null.
   bool get enabled => _isVoidParams || _filters != null;
 
-  /// Whether to background-refetch when mounting with cached data.
-  RefetchOnMount get refetchOnMount => RefetchOnMount.always;
+  // Option getters. Each returns `null` when not overridden, so precedence is
+  // **controller override → global [QueryDefaults] → hardcoded fallback**.
+
+  /// Whether to background-refetch when mounting with cached data. `null` defers
+  /// to [QueryDefaults.refetchOnMount], then [RefetchOnMount.always].
+  RefetchOnMount? get refetchOnMount => null;
 
   /// Items per page — used as a convenience value in [queryFn] and
   /// [getNextPageParam].
   int get limit => client.defaults.limit;
 
-  /// How long data is considered fresh.
+  /// How long data is considered fresh. `null` defers to [QueryDefaults.staleTime].
   Duration? get staleTime => null;
 
-  /// If set, the controller will automatically refetch at this interval.
+  /// How long an unobserved cache entry is kept before GC. `null` defers to
+  /// [QueryDefaults.gcTime] (default `null` = keep forever).
+  Duration? get gcTime => null;
+
+  /// If set, the controller will automatically refetch at this interval. `null`
+  /// defers to [QueryDefaults.refetchInterval].
   Duration? get refetchInterval => null;
 
-  /// Number of retry attempts on failure.
-  int get retryCount => 3;
+  /// Number of retry attempts on failure. `null` defers to
+  /// [QueryDefaults.retryCount], then `3`.
+  int? get retryCount => null;
 
-  /// Base delay between retries. Uses exponential backoff.
-  Duration get retryDelay => const Duration(seconds: 1);
+  /// Base delay between retries (exponential backoff). `null` defers to
+  /// [QueryDefaults.retryDelay], then 1 second.
+  Duration? get retryDelay => null;
 
-  /// Controls whether this query requires network connectivity.
-  NetworkMode get networkMode => NetworkMode.online;
+  /// Controls whether this query requires network connectivity. `null` defers to
+  /// [QueryDefaults.networkMode], then [NetworkMode.online].
+  NetworkMode? get networkMode => null;
 
-  /// Controls whether this query refetches when network connectivity is restored.
-  RefetchOnReconnect get refetchOnReconnect => RefetchOnReconnect.ifStale;
+  /// Whether this query refetches when connectivity is restored. `null` defers
+  /// to [QueryDefaults.refetchOnReconnect], then [RefetchOnReconnect.ifStale].
+  RefetchOnReconnect? get refetchOnReconnect => null;
 
-  /// Controls whether this query refetches when the app returns to the
-  /// foreground. Defaults to [RefetchOnAppFocus.ifStale].
-  RefetchOnAppFocus get refetchOnAppFocus => RefetchOnAppFocus.ifStale;
+  /// Whether this query refetches when the app returns to the foreground. `null`
+  /// defers to [QueryDefaults.refetchOnAppFocus], then [RefetchOnAppFocus.ifStale].
+  RefetchOnAppFocus? get refetchOnAppFocus => null;
 
   /// Whether [refetchInterval] keeps polling while the app is backgrounded.
-  bool get refetchIntervalInBackground => false;
+  /// `null` defers to [QueryDefaults.refetchIntervalInBackground], then `false`.
+  bool? get refetchIntervalInBackground => null;
 
-  /// When true, keeps the previous filters' data visible (with
-  /// [QueryState.isPlaceholderData] set) while fetching after a [setParams] call.
-  bool get keepPreviousData => false;
+  /// When true, keeps the previous filters' data visible (flagged
+  /// [QueryState.isPlaceholderData]) while fetching after a [setParams] call.
+  /// `null` defers to [QueryDefaults.keepPreviousData], then `false`.
+  bool? get keepPreviousData => null;
 
   // ─── Lifecycle hooks (override to customize) ─────────────────────
 
@@ -330,23 +345,30 @@ abstract class InfiniteQueryController<T, PageParam, P>
   // ─── Resolved defaults (controller override → global → hardcoded) ─
 
   Duration? get _resolvedStaleTime => staleTime ?? client.defaults.staleTime;
+  Duration? get _resolvedGcTime => gcTime ?? client.defaults.gcTime;
   RefetchOnMount get _resolvedRefetchOnMount =>
-      client.defaults.refetchOnMount ?? refetchOnMount;
-  int get _resolvedRetryCount => client.defaults.retryCount ?? retryCount;
-  Duration get _resolvedRetryDelay => client.defaults.retryDelay ?? retryDelay;
+      refetchOnMount ?? client.defaults.refetchOnMount ?? RefetchOnMount.always;
+  int get _resolvedRetryCount => retryCount ?? client.defaults.retryCount ?? 3;
+  Duration get _resolvedRetryDelay =>
+      retryDelay ?? client.defaults.retryDelay ?? const Duration(seconds: 1);
   Duration? get _resolvedRefetchInterval =>
       refetchInterval ?? client.defaults.refetchInterval;
-  Duration? get _resolvedGcTime => client.defaults.gcTime;
   NetworkMode get _resolvedNetworkMode =>
-      client.defaults.networkMode ?? networkMode;
+      networkMode ?? client.defaults.networkMode ?? NetworkMode.online;
   RefetchOnReconnect get _resolvedRefetchOnReconnect =>
-      client.defaults.refetchOnReconnect ?? refetchOnReconnect;
+      refetchOnReconnect ??
+      client.defaults.refetchOnReconnect ??
+      RefetchOnReconnect.ifStale;
   RefetchOnAppFocus get _resolvedRefetchOnAppFocus =>
-      client.defaults.refetchOnAppFocus ?? refetchOnAppFocus;
+      refetchOnAppFocus ??
+      client.defaults.refetchOnAppFocus ??
+      RefetchOnAppFocus.ifStale;
   bool get _resolvedRefetchIntervalInBackground =>
-      client.defaults.refetchIntervalInBackground ?? refetchIntervalInBackground;
+      refetchIntervalInBackground ??
+      client.defaults.refetchIntervalInBackground ??
+      false;
   bool get _resolvedKeepPreviousData =>
-      client.defaults.keepPreviousData ?? keepPreviousData;
+      keepPreviousData ?? client.defaults.keepPreviousData ?? false;
 
   // ─── Network helpers ────────────────────────────────────────────
 

@@ -1,3 +1,33 @@
+## 4.1.0
+
+### Fixed: controller options now correctly override global defaults
+
+Controller-level option overrides now **always** take precedence over
+`QueryDefaults`, matching the documented contract and TanStack Query. Previously
+several options resolved as `global ?? controller`, so a non-null global default
+silently **overrode** an explicit controller override (e.g. global
+`refetchOnMount: never` suppressed a controller's `refetchOnMount: always`).
+
+* **Precedence is now `controller override → global default → hardcoded fallback`**
+  for every option, across `QueryController`, `InfiniteQueryController`,
+  `QueriesController`, `InfiniteQueriesController` (and mutation `retryDelay`).
+  Affected options: `refetchOnMount`, `retryCount`, `retryDelay`, `networkMode`,
+  `refetchOnReconnect`, `refetchOnAppFocus`, `refetchIntervalInBackground`,
+  `keepPreviousData`. (`staleTime` and `refetchInterval` were already correct.)
+* These option getters now default to **`null`** = "not overridden, defer to the
+  global/hardcoded default." Existing subclass overrides that return a non-null
+  value keep compiling (covariant) and now correctly win over the global.
+* **New: per-controller `gcTime` override** — previously `gcTime` could only be
+  set globally; controllers can now override it like any other option.
+
+**Behaviour change / upgrading:** if you set a global default *and* also overrode
+the same option in a controller, the **controller value now wins** (previously the
+global did). This only affects code that relied on the old inverted precedence;
+review any place you set both a global default and a controller override for the
+options above.
+
+---
+
 ## 4.0.0
 
 ### Universal refetch-on-visible across all navigation (no per-package hacks)

@@ -27,7 +27,7 @@ Handles **fetching, caching, synchronizing, and updating** server state with min
 
 ```yaml
 dependencies:
-  flutter_query_client: ^4.0.0
+  flutter_query_client: ^4.1.0
 ```
 
 ---
@@ -718,7 +718,27 @@ QueryClientProvider(
 )
 ```
 
-All `QueryDefaults` values apply globally but are overridable on each controller.
+### Precedence
+
+Every option resolves **controller override → global `QueryDefaults` → hardcoded
+default**. A value you override on a controller **always wins** over the global
+default; the global applies only when the controller doesn't override it; the
+built-in default is the final fallback. This holds for `refetchOnMount`,
+`staleTime`, `gcTime`, `retryCount`, `retryDelay`, `refetchInterval`,
+`networkMode`, `refetchOnReconnect`, `refetchOnAppFocus`,
+`refetchIntervalInBackground`, and `keepPreviousData` — on every controller type.
+
+```dart
+QueryDefaults(refetchOnMount: RefetchOnMount.never) // global
+
+class Feed extends QueryController<List<Post>, void> {
+  @override
+  RefetchOnMount get refetchOnMount => RefetchOnMount.always; // wins → Feed refetches
+}
+```
+
+> Fixed in **4.1.0** — earlier versions let a non-null global default override an
+> explicit controller override. `gcTime` is also per-controller overridable as of 4.1.0.
 
 ---
 

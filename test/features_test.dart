@@ -20,12 +20,12 @@ abstract class ApiService {
 
 class SimpleQueryController extends QueryController<String, void> {
   final Future<String> Function() fetchFn;
-  final RefetchOnMount _refetchOnMount;
+  final RefetchOnMount? _refetchOnMount;
   int fetchCount = 0;
 
   SimpleQueryController({
     required this.fetchFn,
-    RefetchOnMount refetchOnMount = RefetchOnMount.always,
+    RefetchOnMount? refetchOnMount = RefetchOnMount.always,
     Duration? staleTime,
     String key = 'test',
     ErrorTransformer? transformError,
@@ -35,8 +35,9 @@ class SimpleQueryController extends QueryController<String, void> {
 
   final Duration? _staleTime;
 
+  // Pass `refetchOnMount: null` to defer to the global default.
   @override
-  RefetchOnMount get refetchOnMount => _refetchOnMount;
+  RefetchOnMount? get refetchOnMount => _refetchOnMount;
   @override
   Duration? get staleTime => _staleTime;
   @override
@@ -555,6 +556,7 @@ void main() {
       final controller = SimpleQueryController(
         key: 'rom-global-test',
         fetchFn: () async => 'fresh',
+        refetchOnMount: null, // defer to the global default (never)
       );
 
       await Future.delayed(const Duration(milliseconds: 100));
@@ -985,10 +987,10 @@ void main() {
       QueryClient.instance
           .setDefaults(const QueryDefaults(keepPreviousData: true));
 
-      // ParamQueryController does not override keepPreviousData — it comes
-      // from the global default here.
+      // ParamQueryController does not override keepPreviousData — it returns
+      // null (defer) so the global default applies here.
       final controller = ParamQueryController(key: 'kpd-global');
-      expect(controller.keepPreviousData, isFalse); // controller-level default
+      expect(controller.keepPreviousData, isNull); // defers to global
       controller.setParams(1);
       await Future.delayed(const Duration(milliseconds: 50));
       expect(controller.state.data, 'result-1');

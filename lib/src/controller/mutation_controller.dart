@@ -43,14 +43,16 @@ abstract class MutationController<T, P> extends Cubit<QueryState<T>> {
   /// to mutations — only the controller-level override is used.
   int get retryCount => 0;
 
-  /// Base delay between retries. Actual delay uses exponential backoff.
-  Duration get retryDelay => const Duration(seconds: 1);
+  /// Base delay between retries (exponential backoff). `null` (default) defers
+  /// to [QueryDefaults.retryDelay], then 1 second. A controller override always
+  /// wins over the global default.
+  Duration? get retryDelay => null;
 
   // ─── Resolved defaults ───────────────────────────────────────────
 
   int get _resolvedRetryCount => retryCount;
   Duration get _resolvedRetryDelay =>
-      _client.defaults.retryDelay ?? retryDelay;
+      retryDelay ?? _client.defaults.retryDelay ?? const Duration(seconds: 1);
 
   // ─── Safe emit ──────────────────────────────────────────────────
 

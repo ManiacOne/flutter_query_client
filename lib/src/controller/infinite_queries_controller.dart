@@ -64,17 +64,20 @@ abstract class InfiniteQueriesController<T, PageParam, F>
   int? get limit => null;
 
   // ─── Options (override to customize; forwarded to every sub-controller) ─
+  // `null` = not overridden → the sub-controller resolves
+  // controller override → global [QueryDefaults] → hardcoded fallback.
 
   Duration? get staleTime => null;
+  Duration? get gcTime => null;
   Duration? get refetchInterval => null;
-  int get retryCount => 3;
-  Duration get retryDelay => const Duration(seconds: 1);
-  NetworkMode get networkMode => NetworkMode.online;
-  RefetchOnMount get refetchOnMount => RefetchOnMount.always;
-  RefetchOnReconnect get refetchOnReconnect => RefetchOnReconnect.ifStale;
-  RefetchOnAppFocus get refetchOnAppFocus => RefetchOnAppFocus.ifStale;
-  bool get refetchIntervalInBackground => false;
-  bool get keepPreviousData => false;
+  int? get retryCount => null;
+  Duration? get retryDelay => null;
+  NetworkMode? get networkMode => null;
+  RefetchOnMount? get refetchOnMount => null;
+  RefetchOnReconnect? get refetchOnReconnect => null;
+  RefetchOnAppFocus? get refetchOnAppFocus => null;
+  bool? get refetchIntervalInBackground => null;
+  bool? get keepPreviousData => null;
 
   // ─── Filters ─────────────────────────────────────────────────────
 
@@ -204,21 +207,23 @@ class _DelegatingInfiniteController<T, PageParam, F>
   @override
   Duration? get staleTime => _parent.staleTime;
   @override
+  Duration? get gcTime => _parent.gcTime;
+  @override
   Duration? get refetchInterval => _parent.refetchInterval;
   @override
-  int get retryCount => _parent.retryCount;
+  int? get retryCount => _parent.retryCount;
   @override
-  Duration get retryDelay => _parent.retryDelay;
+  Duration? get retryDelay => _parent.retryDelay;
   @override
-  NetworkMode get networkMode => _parent.networkMode;
+  NetworkMode? get networkMode => _parent.networkMode;
   @override
-  RefetchOnMount get refetchOnMount => _parent.refetchOnMount;
+  RefetchOnMount? get refetchOnMount => _parent.refetchOnMount;
   @override
-  RefetchOnReconnect get refetchOnReconnect => _parent.refetchOnReconnect;
+  RefetchOnReconnect? get refetchOnReconnect => _parent.refetchOnReconnect;
   @override
-  RefetchOnAppFocus get refetchOnAppFocus => _parent.refetchOnAppFocus;
+  RefetchOnAppFocus? get refetchOnAppFocus => _parent.refetchOnAppFocus;
   @override
-  bool get refetchIntervalInBackground => _parent.refetchIntervalInBackground;
+  bool? get refetchIntervalInBackground => _parent.refetchIntervalInBackground;
   @override
-  bool get keepPreviousData => _parent.keepPreviousData;
+  bool? get keepPreviousData => _parent.keepPreviousData;
 }
